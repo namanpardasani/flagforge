@@ -18,13 +18,14 @@ Running log of decisions, tradeoffs, failure answers, and interview Q&A.
 | Server-side SDK first, browser SDK later | Browser code is public, so full targeting rules would leak |
 | SSE vs Socket.IO for SDK streaming | Decide in Week 2 |
 
-## Free-tier limits (verify and fill in)
-| Service | Limit | Checked on |
+## Free-tier limits (checked 2026-10-09)
+| Service | Limit | Implication |
 |---|---|---|
-| Neon (Postgres) | | |
-| Upstash (Redis) | | |
-| Render (backend) | | |
-| Vercel (frontend) | | |
+| Neon (Postgres) | 0.5 GB storage, 100 CU-hours/month per project, scales to zero after 5 min idle, 6h restore window | Aggregate experiment events; first query after idle is slow |
+| Upstash (Redis) | 256 MB, 500K commands/month, 10K cmds/sec | Run k6 against local Redis only; keep pub/sub and rate-limit commands lean |
+| Render (backend) | 750 instance hours/month per workspace, sleeps after 15 min idle, cold start ~15s or longer | SSE drops on sleep; SDK must reconnect and resync; warm up before demos; keep a video |
+| Vercel (frontend) | Hobby: 100 GB transfer, 1M edge requests, non-commercial only | Fine for a portfolio project |
+| Fly.io | 7-day trial, then card required | Dropped |
 
 ## What happens if X fails (fill in as we build)
 - Postgres down:
