@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    container_name: flagforge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flagforge
+      POSTGRES_PASSWORD: flagforge_dev
+      POSTGRES_DB: flagforge
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: flagforge-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
