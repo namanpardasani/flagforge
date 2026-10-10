@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "FlagState" ADD COLUMN     "fallthroughBps" INTEGER NOT NULL DEFAULT 10000,
+ADD COLUMN     "rules" JSONB NOT NULL DEFAULT '[]';

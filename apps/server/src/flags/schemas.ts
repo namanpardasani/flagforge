@@ -16,9 +16,6 @@ export const updateFlagSchema = z
   .object({ name: name.optional(), description: description.nullable().optional() })
   .refine((v) => v.name !== undefined || v.description !== undefined, "Provide name or description");
 
-// Strict boolean: the string "true" is rejected on purpose.
-export const setFlagStateSchema = z.object({ enabled: z.boolean() });
-
 export const auditQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });

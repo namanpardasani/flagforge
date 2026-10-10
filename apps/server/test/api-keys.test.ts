@@ -185,8 +185,12 @@ describe("GET /sdk/v1/flags", () => {
     const dev = await sdkFlags(devKey);
     expect(dev.status).toBe(200);
     expect(dev.body.environment).toMatchObject({ id: devId, key: "dev" });
-    expect(dev.body.flags).toEqual([{ key: "alpha", enabled: true }, { key: "beta", enabled: false }]);
-    expect((await sdkFlags(prodKey)).body.flags).toEqual([{ key: "alpha", enabled: false }, { key: "beta", enabled: false }]);
+    const off = { rules: [], fallthroughBps: 10000 };
+    expect(dev.body.flags).toEqual([{ key: "alpha", enabled: true, ...off }, { key: "beta", enabled: false, ...off }]);
+    expect((await sdkFlags(prodKey)).body.flags).toEqual([
+      { key: "alpha", enabled: false, ...off },
+      { key: "beta", enabled: false, ...off },
+    ]);
   });
 
   it("never exposes another tenant's flags", async () => {
@@ -194,7 +198,7 @@ describe("GET /sdk/v1/flags", () => {
     await flag("theirs-only", otherWsId, otherProjectId, outsider);
     const theirKey = (await createKey(outsider, otherEnvId, "k", otherWsId, otherProjectId)).body.key;
     const res = await sdkFlags(theirKey);
-    expect(res.body.flags).toEqual([{ key: "theirs-only", enabled: false }]);
+    expect(res.body.flags).toEqual([{ key: "theirs-only", enabled: false, rules: [], fallthroughBps: 10000 }]);
     const myKey = (await createKey(owner)).body.key;
     expect(JSON.stringify((await sdkFlags(myKey)).body)).not.toContain("theirs-only");
   });

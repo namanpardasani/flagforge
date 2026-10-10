@@ -1,7 +1,9 @@
-import type { PrismaClient } from "../../generated/prisma/client.js";
+import type { Rule } from "@flagforge/core";
+import type { Prisma, PrismaClient } from "../../generated/prisma/client.js";
 import { writeAudit } from "../audit.js";
 import { AppError } from "../errors.js";
 import type { CreateFlagInput, UpdateFlagInput } from "./schemas.js";
+import { normalizeRules, parseStoredRules, presentRule, toBps, toPercentage, type SetFlagStateInput } from "./targeting.js";
 
 const flagNotFound = () => new AppError(404, "FLAG_NOT_FOUND", "Flag not found");
 const projectNotFound = () => new AppError(404, "PROJECT_NOT_FOUND", "Project not found");
@@ -14,7 +16,7 @@ interface FlagRow {
   description: string | null;
   createdAt: Date;
   updatedAt: Date;
-  states: { environmentId: string; enabled: boolean }[];
+  states: { environmentId: string; enabled: boolean; rules: unknown; fallthroughBps: number }[];
 }
 interface EnvRow {
   id: string;
@@ -22,9 +24,11 @@ interface EnvRow {
   name: string;
 }
 
-/** Every environment of the project appears in the result; a missing FlagState row means "off". */
+const stateSelect = { environmentId: true, enabled: true, rules: true, fallthroughBps: true } as const;
+
+/** Every environment of the project appears in the result; a missing FlagState row means "off, everyone". */
 function present(flag: FlagRow, environments: EnvRow[]) {
-  const enabledBy = new Map(flag.states.map((s) => [s.environmentId, s.enabled]));
+  const stateBy = new Map(flag.states.map((s) => [s.environmentId, s]));
   return {
     id: flag.id,
     projectId: flag.projectId,
@@ -33,12 +37,17 @@ function present(flag: FlagRow, environments: EnvRow[]) {
     description: flag.description,
     createdAt: flag.createdAt,
     updatedAt: flag.updatedAt,
-    environments: environments.map((e) => ({
-      environmentId: e.id,
-      key: e.key,
-      name: e.name,
-      enabled: enabledBy.get(e.id) ?? false,
-    })),
+    environments: environments.map((e) => {
+      const state = stateBy.get(e.id);
+      return {
+        environmentId: e.id,
+        key: e.key,
+        name: e.name,
+        enabled: state?.enabled ?? false,
+        rules: state ? parseStoredRules(state.rules).map(presentRule) : [],
+        rolloutPercentage: toPercentage(state?.fallthroughBps ?? 10000),
+      };
+    }),
   };
 }
 
@@ -60,7 +69,7 @@ export function createFlagService(prisma: PrismaClient) {
   async function loadFlag(workspaceId: string, projectId: string, flagId: string) {
     const flag = await prisma.flag.findFirst({
       where: { id: flagId, projectId, workspaceId },
-      include: { states: { select: { environmentId: true, enabled: true } } },
+      include: { states: { select: stateSelect } },
     });
     if (!flag) throw flagNotFound();
     return present(flag, await projectEnvironments(workspaceId, projectId));
@@ -98,7 +107,7 @@ export function createFlagService(prisma: PrismaClient) {
       const [flags, environments] = await Promise.all([
         prisma.flag.findMany({
           where: { projectId, workspaceId },
-          include: { states: { select: { environmentId: true, enabled: true } } },
+          include: { states: { select: stateSelect } },
           orderBy: { createdAt: "asc" },
         }),
         projectEnvironments(workspaceId, projectId),
@@ -144,14 +153,18 @@ export function createFlagService(prisma: PrismaClient) {
       });
     },
 
-    /** Flag and environment must both belong to this project and workspace, or it is a 404. */
+    /**
+     * Updates a flag's state in ONE environment. Send only the fields to change (enabled, rules,
+     * rolloutPercentage); the rest are kept. Flag and environment must both belong to this
+     * project and workspace, or it is a 404.
+     */
     async setFlagState(
       workspaceId: string,
       projectId: string,
       flagId: string,
       environmentId: string,
       actorId: string,
-      enabled: boolean,
+      patch: SetFlagStateInput,
     ) {
       await prisma.$transaction(async (tx) => {
         const flag = await tx.flag.findFirst({ where: { id: flagId, projectId, workspaceId } });
@@ -162,20 +175,53 @@ export function createFlagService(prisma: PrismaClient) {
         const current = await tx.flagState.findUnique({
           where: { flagId_environmentId: { flagId, environmentId } },
         });
-        const from = current?.enabled ?? false;
+        const before = {
+          enabled: current?.enabled ?? false,
+          rules: current ? parseStoredRules(current.rules) : ([] as Rule[]),
+          fallthroughBps: current?.fallthroughBps ?? 10000,
+        };
+        const after = {
+          enabled: patch.enabled ?? before.enabled,
+          rules: patch.rules ? normalizeRules(patch.rules) : before.rules,
+          fallthroughBps: patch.rolloutPercentage !== undefined ? toBps(patch.rolloutPercentage) : before.fallthroughBps,
+        };
+
+        const data = {
+          enabled: after.enabled,
+          rules: after.rules as unknown as Prisma.InputJsonValue,
+          fallthroughBps: after.fallthroughBps,
+        };
         await tx.flagState.upsert({
           where: { flagId_environmentId: { flagId, environmentId } },
-          create: { flagId, environmentId, workspaceId, enabled },
-          update: { enabled },
+          create: { flagId, environmentId, workspaceId, ...data },
+          update: data,
         });
-        if (from !== enabled) {
+
+        const where = { key: flag.key, environmentId, environmentKey: environment.key };
+        if (before.enabled !== after.enabled) {
           await writeAudit(tx, {
             workspaceId,
             actorId,
             entityType: "flag",
             action: "flag.toggled",
             entityId: flagId,
-            metadata: { key: flag.key, environmentId, environmentKey: environment.key, from, to: enabled },
+            metadata: { ...where, from: before.enabled, to: after.enabled },
+          });
+        }
+        const targetingChanged =
+          before.fallthroughBps !== after.fallthroughBps || JSON.stringify(before.rules) !== JSON.stringify(after.rules);
+        if (targetingChanged) {
+          await writeAudit(tx, {
+            workspaceId,
+            actorId,
+            entityType: "flag",
+            action: "flag.targeting_updated",
+            entityId: flagId,
+            metadata: {
+              ...where,
+              before: { rules: before.rules, fallthroughBps: before.fallthroughBps },
+              after: { rules: after.rules, fallthroughBps: after.fallthroughBps },
+            } as unknown as Prisma.InputJsonValue,
           });
         }
       });

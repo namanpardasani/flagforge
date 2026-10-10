@@ -7,10 +7,10 @@ import {
   flagParams,
   flagStateParams,
   flagsParams,
-  setFlagStateSchema,
   updateFlagSchema,
 } from "../flags/schemas.js";
 import type { FlagService } from "../flags/service.js";
+import { setFlagStateSchema } from "../flags/targeting.js";
 import { requireAuth } from "../middleware/require-auth.js";
 import { validate } from "../middleware/validate.js";
 import { requireWorkspaceRole } from "../middleware/workspace-access.js";
@@ -73,7 +73,7 @@ export function flagsRouter(service: FlagService, prisma: PrismaClient, config: 
           param(req, "flagId"),
           param(req, "environmentId"),
           userId,
-          req.body.enabled,
+          req.body,
         ),
       );
     },
