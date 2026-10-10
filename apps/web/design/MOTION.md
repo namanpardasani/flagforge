@@ -93,6 +93,41 @@ old page fades out (120ms), then the new one fades up (180ms). Quick, because na
 **Pausing offscreen.** `useOffscreenPause` sets `data-paused` on an element when it leaves the
 viewport or the tab is hidden; one CSS rule pauses every animation underneath. No re-render.
 
+## The quiet zone (tables and forms)
+
+Dense tables and forms are where people read and type, so nothing there may bounce. Inside the
+flag list, the targeting form and the rule builder, use only the `quiet` transition
+(`duration.quick`, ease-out) and hover states. Rows that move because of a filter, a sort or a
+reorder slide with `quiet`, not with a spring. Springs are kept for small controls that respond to
+a direct press: the switch thumb, a dialog or toast arriving.
+
+## Flag screens
+
+**Switch bloom.** When a flag turns on, a soft ember disc scales up from behind the thumb and fades
+out (0.55s, transform and opacity). It plays only on a real off-to-on change, never on first
+render, and never when turning off.
+
+**Hold to confirm.** The ring fills over 700ms and rewinds if released early. It is one
+MotionValue (0 to 1) driving two rotating half-rings behind clipping windows, so the fill is
+rotation only: no stroke-dashoffset animation and no React re-render per frame. A click does
+nothing; holding Space or Enter works the same as holding the pointer.
+
+**Row flash.** An absolutely positioned layer over the row fades its opacity to zero. Ember, 1.2s,
+for a change that arrived from elsewhere; ink, quick, for your own change; danger for a Production
+kill. The 1.2s live-update flash is the one deliberate exception to the 800ms ceiling: it is
+passive (it never delays an action) and it has to be noticed in peripheral vision. The mono
+"updated just now" tag stays for 6 seconds.
+
+**Number tickers.** Each digit is a column of 0 to 9 moved with `translateY`; only digits that
+changed move. The real number is given to screen readers as plain text.
+
+**Dot grid.** 100 squares, each with a lit layer and an outline layer that fade with opacity
+(150ms CSS). Moving the slider re-renders the grid but hashes nothing: the sample is computed once
+per flag.
+
+**List.** Rows stagger in once on first load. After that, filter and sort move rows with
+`layout="position"` and leaving rows fade out (`AnimatePresence mode="popLayout"`).
+
 ## Smooth scrolling
 
 Lenis is used on the landing page only. It is imported in `pages/Landing.tsx`, which is

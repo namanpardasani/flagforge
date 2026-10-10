@@ -39,6 +39,19 @@ land. If a screen has more than a handful of ember marks, something is being cal
 
 Never use ember for: decoration, links, primary buttons, illustrations, empty states.
 
+Ember also marks a change that **arrived live** from somewhere else: the row flash. That is the
+same idea (this is happening right now). Your own change flashes in ink, a Production kill in
+danger, so ember keeps meaning "live" and nothing else.
+
+In the rollout dot grid, lit squares are ember only when the flag is on in the environment being
+viewed; otherwise they are `muted`. A square that differs from what is saved gets an outline: ink
+for "would be added", danger for "would be removed".
+
+### Production
+Any change in Production needs a deliberate hold (700ms), never a single click. This applies in
+one place in the code (`FlagGuard`), so the list, the detail page and the command palette cannot
+disagree about it.
+
 ## Type
 
 | Family | Package | Use |

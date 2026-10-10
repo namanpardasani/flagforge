@@ -3,6 +3,7 @@ import { Tabs as TabsPrimitive } from "radix-ui";
 import { useId, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { spring } from "@/motion";
+import { Ticker } from "./ticker";
 
 export interface TabItem {
   value: string;
@@ -44,7 +45,7 @@ export function Tabs({ items, value, onValueChange, label, children, className }
               className={cn("relative -mb-px flex h-9 items-center gap-2 text-sm", active ? "text-ink" : "text-muted hover:text-ink")}
             >
               {item.label}
-              {item.count !== undefined && <span className="font-mono text-2xs text-faint">{String(item.count).padStart(2, "0")}</span>}
+              {item.count !== undefined && <Ticker value={item.count} className="text-2xs text-faint" />}
               {active && <motion.span layoutId={`${id}-underline`} transition={spring.layout} className="absolute inset-x-0 bottom-0 h-px bg-ember" />}
             </TabsPrimitive.Trigger>
           );

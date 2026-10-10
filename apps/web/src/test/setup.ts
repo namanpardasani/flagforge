@@ -1,13 +1,21 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { resetMockServer } from "@/mocks/api";
+import { resetFlashes } from "@/stores/flash";
+import { resetToasts } from "@/stores/toasts";
 
 // jsdom is a pretend browser and leaves out several APIs the UI libraries call. These are the
 // smallest stand-ins that let components mount; they do not try to imitate real behaviour.
 
+// Everything that outlives a component (saved preferences, the pretend server, the stores) is put
+// back after each test, so no test can pass or fail because of the one before it.
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  resetMockServer();
+  resetFlashes();
+  resetToasts();
 });
 
 // A fake matchMedia that behaves like the real one for "prefers-reduced-motion": `matches` is

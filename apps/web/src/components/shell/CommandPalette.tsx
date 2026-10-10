@@ -1,12 +1,16 @@
 import { Command } from "cmdk";
-import { CornerDownLeft, PanelLeft, Search } from "lucide-react";
+import { CornerDownLeft, Flag as FlagIcon, PanelLeft, Power, Radio, Search } from "lucide-react";
 import { Dialog } from "radix-ui";
 import type { ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Crosshairs } from "@/components/blueprint/Frame";
 import { LiveDot } from "@/components/blueprint/marks";
 import { Kbd } from "@/components/ui/kbd";
-import { ENVIRONMENTS } from "@/mocks/data";
+import { useGuardedToggle } from "@/components/flags/use-flag-guard";
+import { useFlags } from "@/data/queries";
+import { fuzzyScore } from "@/lib/fuzzy";
+import { simulateRemoteChange } from "@/mocks/api";
+import { ENVIRONMENTS, envName } from "@/mocks/data";
 import { ALL_NAV_ITEMS } from "./nav";
 import { useShell } from "./use-shell";
 import { paths, useScope } from "./use-scope";
@@ -27,7 +31,13 @@ function Item({ children, hint, ...props }: { children: ReactNode; hint?: ReactN
 }
 
 /**
- * Ctrl/Cmd+K command palette (shell only for now: navigation and view commands).
+ * Ctrl/Cmd+K command palette: pages, projects, environments, every flag, and actions on them.
+ *
+ * Search is fuzzy (lib/fuzzy.ts): letters may be skipped, so "rtopt" finds "route-optimizer-v2"
+ * and "kill pay" finds "Turn off instant-payouts". Each item also carries hidden keywords (the
+ * flag's name, "kill", "disable"...) so it can be found by what people call it, not only by what
+ * the row says. cmdk's own matcher was replaced because it let letters scatter across a whole
+ * description, so a search for "audit" returned nine unrelated rows.
  *
  * Built from two accessible pieces rather than hand-rolled key handling:
  *  - Radix Dialog: focus trap, Escape to close, focus returns to where it was.
@@ -39,7 +49,10 @@ export function CommandPalette() {
   const { paletteOpen, setPaletteOpen, toggleCollapsed, collapsed, env, setEnv } = useShell();
   const scope = useScope();
   const navigate = useNavigate();
-  const { page = "overview" } = useParams();
+  const params = useParams();
+  const page = params["page"] ?? (params["flagKey"] ? "flags" : "overview");
+  const flags = useFlags(scope.projectKey).data ?? [];
+  const toggle = useGuardedToggle();
 
   /** Close first, then act, so focus is not stolen back by the closing dialog. */
   const run = (action: () => void) => () => {
@@ -57,10 +70,10 @@ export function CommandPalette() {
         >
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>
           <Crosshairs />
-          <Command label="Command palette" loop>
+          <Command label="Command palette" loop filter={(value, search, keywords) => fuzzyScore([value, ...(keywords ?? [])].join(" "), search)}>
             <div className="flex h-12 items-center gap-3 border-b border-hairline px-4">
               <Search aria-hidden className="size-4 shrink-0 text-muted" strokeWidth={1.5} />
-              <Command.Input placeholder="Jump to a page, project or environment" className="h-full flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-faint" />
+              <Command.Input placeholder="Search flags, pages and actions" className="h-full flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-faint" />
               <Kbd>esc</Kbd>
             </div>
 
@@ -75,6 +88,52 @@ export function CommandPalette() {
                   </Item>
                 ))}
               </Command.Group>
+
+              {flags.length > 0 && (
+                <Command.Group heading="Flags" className={groupClass}>
+                  {flags.map((flag) => (
+                    <Item
+                      key={flag.id}
+                      value={`flag ${flag.key}`}
+                      keywords={[flag.name, flag.description]}
+                      hint={flag.states[env].enabled ? `on in ${env}` : `off in ${env}`}
+                      onSelect={run(() => navigate(paths.flag(scope.workspaceSlug, scope.projectKey, flag.key)))}
+                    >
+                      <FlagIcon strokeWidth={1.5} />
+                      <span className="truncate font-mono text-xs">{flag.key}</span>
+                    </Item>
+                  ))}
+                </Command.Group>
+              )}
+
+              {flags.length > 0 && (
+                <Command.Group heading="Actions" className={groupClass}>
+                  {flags.map((flag) => {
+                    const on = flag.states[env].enabled;
+                    return (
+                      <Item
+                        key={flag.id}
+                        value={`turn ${on ? "off" : "on"} ${flag.key}`}
+                        keywords={[flag.name, envName(env), on ? "kill disable stop" : "enable start launch"]}
+                        hint={env === "prod" ? "hold to confirm" : env}
+                        // In Production this opens the hold-to-confirm dialog rather than acting at once.
+                        onSelect={run(() => toggle(flag, !on))}
+                      >
+                        <Power strokeWidth={1.5} />
+                        <span className="truncate">
+                          Turn {on ? "off" : "on"} <span className="font-mono text-xs">{flag.key}</span>
+                        </span>
+                      </Item>
+                    );
+                  })}
+                  {import.meta.env.DEV && (
+                    <Item value="simulate remote update" keywords={["dev", "live", "stream", "teammate"]} hint="dev" onSelect={run(() => void simulateRemoteChange(scope.projectKey, env))}>
+                      <Radio strokeWidth={1.5} />
+                      Simulate remote update
+                    </Item>
+                  )}
+                </Command.Group>
+              )}
 
               <Command.Group heading="Switch project" className={groupClass}>
                 {scope.projects.map((project) => (

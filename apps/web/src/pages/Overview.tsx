@@ -30,7 +30,7 @@ export function OverviewPage() {
   const all = flags.data ?? [];
   const live = all.filter((f) => f.states[env].enabled);
   const partial = live.filter((f) => f.states[env].rolloutPercentage < 100);
-  const withRules = all.filter((f) => f.states[env].rules > 0);
+  const withRules = all.filter((f) => f.states[env].rules.length > 0);
 
   return (
     <RevealGroup className="space-y-10">

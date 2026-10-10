@@ -33,5 +33,11 @@ export const spring = {
   layout: { type: "spring", stiffness: 380, damping: 34, mass: 0.9 },
 } as const satisfies Record<string, Transition>;
 
+/**
+ * The quiet zone: dense tables and forms. People read and type here, so nothing may bounce or
+ * overshoot. Rows that reorder or appear use this plain, fast ease instead of a spring.
+ */
+export const quiet = { duration: duration.quick, ease: easeOut } as const satisfies Transition;
+
 /** Delay between siblings in a staggered list. Small, so long lists do not feel slow. */
 export const staggerStep = 0.04;

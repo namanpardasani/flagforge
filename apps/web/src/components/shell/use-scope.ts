@@ -4,6 +4,7 @@ import { useProjects, useWorkspaces } from "@/data/queries";
 /** Builds dashboard paths in one place, so the URL shape can change without a hunt through the code. */
 export const paths = {
   project: (workspaceSlug: string, projectKey: string, page = "overview") => `/w/${workspaceSlug}/p/${projectKey}/${page}`,
+  flag: (workspaceSlug: string, projectKey: string, flagKey: string) => `/w/${workspaceSlug}/p/${projectKey}/flags/${flagKey}`,
   kit: "/kit",
   landing: "/landing",
 };

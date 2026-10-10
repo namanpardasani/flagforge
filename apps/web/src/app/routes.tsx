@@ -1,6 +1,7 @@
 import { Navigate, type RouteObject } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import { DEFAULT_SCOPE, paths } from "@/components/shell/use-scope";
+import { FlagDetailPage } from "@/pages/FlagDetail";
 import { KitPage } from "@/pages/Kit";
 import { LandingRoute } from "@/pages/LandingRoute";
 import { NotFound, ProjectPage } from "@/pages/ProjectPage";
@@ -18,6 +19,7 @@ export const routes: RouteObject[] = [
     element: <AppShell />,
     children: [
       { index: true, element: <Navigate to="overview" replace /> },
+      { path: "flags/:flagKey", element: <FlagDetailPage /> },
       { path: ":page", element: <ProjectPage /> },
     ],
   },

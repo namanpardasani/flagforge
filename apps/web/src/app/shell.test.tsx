@@ -1,21 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { createMemoryRouter } from "react-router";
-import { RouterProvider } from "react-router/dom";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Providers } from "./Providers";
-import { routes } from "./routes";
-
-/** Mounts the real app (real routes, real providers, mock data) at a URL. */
-function renderApp(url = "/w/halden/p/dispatch-api/overview") {
-  const router = createMemoryRouter(routes, { initialEntries: [url] });
-  render(
-    <Providers>
-      <RouterProvider router={router} />
-    </Providers>,
-  );
-  return { router, user: userEvent.setup() };
-}
+import { renderApp } from "@/test/render-app";
 
 const sidebar = () => screen.getByRole("complementary", { name: "Sidebar" });
 
@@ -154,7 +139,7 @@ describe("command palette", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Jump to a page/)).toHaveFocus();
+    expect(screen.getByPlaceholderText(/Search flags, pages and actions/)).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -207,7 +192,7 @@ describe("command palette", () => {
   });
 });
 
-describe("flags placeholder page", () => {
+describe("flag list basics", () => {
   it("filters with the tabs and counts each state", async () => {
     const { user } = renderApp("/w/halden/p/dispatch-api/flags");
     const tabs = await screen.findByRole("tablist", { name: "Filter flags by state" });
@@ -217,7 +202,8 @@ describe("flags placeholder page", () => {
     expect(rows()).toHaveLength(6);
 
     await user.click(within(tabs).getByRole("tab", { name: /On/ }));
-    expect(rows()).toHaveLength(2);
+    // Filtered-out rows fade for a moment before leaving the page.
+    await waitFor(() => expect(rows()).toHaveLength(2));
     expect(within(tabs).getByRole("tab", { name: /On/ })).toHaveAttribute("aria-selected", "true");
   });
 
@@ -227,15 +213,6 @@ describe("flags placeholder page", () => {
     within(tabs).getByRole("tab", { name: /All/ }).focus();
     await user.keyboard("{ArrowRight}");
     expect(within(tabs).getByRole("tab", { name: /On/ })).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("toggles a switch locally and updates the counts", async () => {
-    const { user } = renderApp("/w/halden/p/dispatch-api/flags");
-    const toggle = await screen.findByRole("switch", { name: "Instant payouts in Production" });
-    expect(toggle).not.toBeChecked();
-    await user.click(toggle);
-    expect(toggle).toBeChecked();
-    expect(screen.getByRole("tab", { name: /On/ })).toHaveTextContent("03");
   });
 
   it("shows the empty state for a project with no flags", async () => {

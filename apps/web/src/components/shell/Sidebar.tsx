@@ -33,7 +33,9 @@ const whenOpen = "transition-opacity duration-150 ease-out-quart group-data-[col
 export function Sidebar() {
   const { collapsed } = useShell();
   const scope = useScope();
-  const { page = "overview" } = useParams();
+  const params = useParams();
+  // A flag key belongs to one project, so from a flag's page the project links go to the flag LIST.
+  const page = params["page"] ?? (params["flagKey"] ? "flags" : "overview");
   const [hovered, setHovered] = useState<string | null>(null);
 
   return (

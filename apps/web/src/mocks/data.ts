@@ -1,7 +1,9 @@
+import type { Operator } from "@flagforge/core";
+
 /**
  * MOCK DATA. Nothing here comes from the server yet.
- * The shapes follow what the real API returns (apps/server), so Prompt 2 can replace the fetchers
- * in mocks/api.ts without changing any component.
+ * The shapes follow what the real API returns (apps/server), so a later step can replace the
+ * fetchers in mocks/api.ts without changing any component.
  *
  * Timestamps are fixed strings on purpose: the UI must render the same way every time, so
  * screenshots and tests do not drift with the clock.
@@ -29,12 +31,25 @@ export interface Project {
   key: string;
 }
 
+/**
+ * One targeting rule as the form edits it: a single condition plus the share of matching users
+ * who get the flag. Rules are checked top to bottom and the first match decides, so ORDER matters.
+ * (The server's rule can hold several AND-ed conditions; the builder starts with one.)
+ */
+export interface TargetingRule {
+  id: string;
+  attribute: string;
+  operator: Operator;
+  /** Kept as text while editing. Lists ("in") are comma separated; numbers are parsed on save. */
+  value: string;
+  rolloutPercentage: number;
+}
+
 export interface FlagState {
   enabled: boolean;
-  /** Share of users who get the flag when it is on (0-100). */
+  /** Share of everyone NOT matched by a rule who get the flag when it is on (0-100). */
   rolloutPercentage: number;
-  /** Number of targeting rules. */
-  rules: number;
+  rules: TargetingRule[];
 }
 
 export interface Flag {
@@ -64,6 +79,8 @@ export const ENVIRONMENTS: readonly Environment[] = [
   { key: "prod", name: "Production" },
 ];
 
+export const envName = (key: EnvKey) => ENVIRONMENTS.find((e) => e.key === key)?.name ?? key;
+
 export const WORKSPACES: readonly Workspace[] = [
   { id: "ws_halden", name: "Halden Freight", slug: "halden", role: "OWNER" },
   { id: "ws_orchard", name: "Orchard Labs", slug: "orchard", role: "MEMBER" },
@@ -76,8 +93,15 @@ export const PROJECTS: readonly Project[] = [
   { id: "pr_store", workspaceSlug: "orchard", name: "Storefront", key: "storefront" },
 ];
 
-const on = (rolloutPercentage = 100, rules = 0): FlagState => ({ enabled: true, rolloutPercentage, rules });
-const off = (rules = 0): FlagState => ({ enabled: false, rolloutPercentage: 100, rules });
+const on = (rolloutPercentage = 100, rules: TargetingRule[] = []): FlagState => ({ enabled: true, rolloutPercentage, rules });
+const off = (rules: TargetingRule[] = []): FlagState => ({ enabled: false, rolloutPercentage: 100, rules });
+const rule = (id: string, attribute: string, operator: Operator, value: string, rolloutPercentage = 100): TargetingRule => ({
+  id,
+  attribute,
+  operator,
+  value,
+  rolloutPercentage,
+});
 
 export const FLAGS: readonly Flag[] = [
   {
@@ -87,7 +111,7 @@ export const FLAGS: readonly Flag[] = [
     name: "Route optimizer v2",
     description: "New solver for multi-stop routes. Rolling out by depot.",
     updatedAt: "2026-10-10T11:42:00Z",
-    states: { dev: on(), staging: on(), prod: on(25, 1) },
+    states: { dev: on(), staging: on(), prod: on(25, [rule("r_depot", "depot", "in", "OSL, BGO")]) },
   },
   {
     id: "fl_02",
@@ -105,7 +129,11 @@ export const FLAGS: readonly Flag[] = [
     name: "Instant payouts",
     description: "Pay drivers on delivery instead of weekly.",
     updatedAt: "2026-10-09T09:18:00Z",
-    states: { dev: on(), staging: on(100, 2), prod: off(2) },
+    states: {
+      dev: on(),
+      staging: on(100, [rule("r_depot", "depot", "in", "OSL, BGO"), rule("r_tenure", "tenureMonths", "gte", "6", 50)]),
+      prod: off([rule("r_depot", "depot", "in", "OSL, BGO"), rule("r_tenure", "tenureMonths", "gte", "6", 50)]),
+    },
   },
   {
     id: "fl_04",
@@ -159,7 +187,7 @@ export const FLAGS: readonly Flag[] = [
     name: "One-page checkout",
     description: "Collapse address, shipping and payment into one step.",
     updatedAt: "2026-10-09T18:40:00Z",
-    states: { dev: on(), staging: on(), prod: on(10, 1) },
+    states: { dev: on(), staging: on(), prod: on(10, [rule("r_beta", "plan", "equals", "beta")]) },
   },
   // "billing" deliberately has no flags, so the empty state has a real place to appear.
 ];
@@ -175,3 +203,6 @@ export const ACTIVITY: readonly Activity[] = [
 ];
 
 export const CURRENT_USER = { name: "Mira Okafor", email: "mira@halden.example" };
+
+/** Someone else on the team, used when the dev panel simulates a change arriving from elsewhere. */
+export const REMOTE_ACTOR = "Jonas Reyes";

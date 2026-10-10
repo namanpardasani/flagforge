@@ -5,6 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FlagToggle } from "@/components/flags/FlagToggle";
+import { HoldToConfirm } from "@/components/ui/hold-to-confirm";
+import { Ticker } from "@/components/ui/ticker";
+import { toast } from "@/stores/toasts";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton, SkeletonGroup } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -44,6 +48,9 @@ export function KitPage() {
   const [on, setOn] = useState(true);
   const [checked, setChecked] = useState<boolean | "indeterminate">("indeterminate");
   const [replay, setReplay] = useState(0);
+  const [flagOn, setFlagOn] = useState(false);
+  const [held, setHeld] = useState(0);
+  const [count, setCount] = useState(6);
 
   return (
     <div className="space-y-8">
@@ -142,6 +149,24 @@ export function KitPage() {
                 <Checkbox checked={checked} onCheckedChange={setChecked} />
                 <span className="font-mono text-xs">{String(checked)}</span>
               </label>
+            </div>
+          </Block>
+
+          <Block fig="9.5a" label="Flag toggle, hold to confirm, ticker, toast">
+            <div className="flex flex-wrap items-center gap-8">
+              <FlagToggle checked={flagOn} onCheckedChange={setFlagOn} label="Example flag" showStatus />
+              <HoldToConfirm key={held} onConfirm={() => { toast("Held for 0.7 seconds", { tone: "danger" }); setTimeout(() => setHeld((n) => n + 1), 600); }}>
+                Hold to confirm
+              </HoldToConfirm>
+              <span className="flex items-center gap-3">
+                <Button size="sm" onClick={() => setCount((n) => (n >= 90 ? 6 : n + 17))}>
+                  Change number
+                </Button>
+                <Ticker value={count} className="text-2xl text-ink" />
+              </span>
+              <Button size="sm" onClick={() => toast("A toast", { detail: "Slides in from the right, leaves by itself.", tone: "live" })}>
+                Show toast
+              </Button>
             </div>
           </Block>
 

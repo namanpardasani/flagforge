@@ -16,13 +16,18 @@ interface TopBarProps {
 export function TopBar({ crumbs }: TopBarProps) {
   const { collapsed, toggleCollapsed, env, setPaletteOpen } = useShell();
   const scope = useScope();
-  const { page } = useParams();
+  const { page, flagKey } = useParams();
 
-  const trail: readonly Crumb[] = crumbs ?? [
+  const start: Crumb[] = [
     { label: scope.workspace?.name ?? scope.workspaceSlug, to: `/w/${scope.workspaceSlug}` },
     { label: scope.project?.name ?? scope.projectKey, to: paths.project(scope.workspaceSlug, scope.projectKey) },
-    { label: pageLabel(page), current: true },
   ];
+  // On a flag's own page the trail goes one level deeper: ... / Flags / the-flag-key
+  const trail: readonly Crumb[] =
+    crumbs ??
+    (flagKey
+      ? [...start, { label: "Flags", to: paths.project(scope.workspaceSlug, scope.projectKey, "flags") }, { label: flagKey, current: true, mono: true }]
+      : [...start, { label: pageLabel(page), current: true }]);
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline px-3">
