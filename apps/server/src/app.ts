@@ -8,6 +8,8 @@ import type { Config } from "./config.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { requestLogger } from "./middleware/request-logger.js";
 import { authRouter } from "./routes/auth.js";
+import { workspacesRouter } from "./routes/workspaces.js";
+import { createWorkspaceService } from "./workspaces/service.js";
 import { healthRouter, type DatabaseCheck } from "./routes/health.js";
 
 export interface AppDeps {
@@ -28,6 +30,7 @@ export function createApp({ logger, config, prisma, checkDatabase }: AppDeps) {
 
   app.use(healthRouter(checkDatabase));
   app.use(authRouter(createAuthService(prisma, config), config));
+  app.use(workspacesRouter(createWorkspaceService(prisma), prisma, config));
 
   // Order matters: 404 first, then the error handler must be last.
   app.use(notFoundHandler);
