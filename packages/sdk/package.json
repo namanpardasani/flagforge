@@ -1,0 +1,22 @@
+{
+  "name": "@flagforge/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FlagForge server-side SDK: local evaluation, polling, offline fallback",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flagforge/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
