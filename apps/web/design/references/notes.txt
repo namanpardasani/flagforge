@@ -1,0 +1,53 @@
+FlagForge design references
+===========================
+
+The images in this folder are MOOD and LAYOUT references only. Nothing is copied from them.
+They are screenshots of other companies' products, so they are git-ignored and stay on this
+machine. Only this file is committed.
+
+No notes file was supplied with the references; the written direction in "Prompt 1" is the brief.
+This file records that direction and what each image contributed.
+
+Direction: "Control room blueprint"
+-----------------------------------
+Dark, technical, handmade. Must not look AI-generated.
+Colours: bg #0C0C0B, raised #141412, hairline #26241F, text #E8E4DC, muted #8A867D,
+         ember #FF5A1F (ONLY live / on / active), danger #E5484D.
+Fonts:   Geist Sans (UI), Geist Mono (keys, numbers, captions),
+         Instrument Serif italic (one accent word per headline).
+Shape:   2-4px radius, hairline borders, crosshair marks at card corners, subtle static film
+         grain, mono captions like "FIG 0.1", faint background grid on marketing surfaces.
+Banned:  purple/blue gradients, glassmorphism, gradient icon squares, three identical centred
+         cards, emoji, lorem ipsum, filler stats, default shadcn look,
+         "Supercharge / Unlock / Seamless" copy.
+
+What each reference contributed
+-------------------------------
+2.png  Linear home page
+       TAKEN: two-tone headline (bright fact, muted continuation), mono "FIG 0.1" captions,
+              hairline dividers between columns, thin-line technical drawings.
+       NOT TAKEN: their wording, their illustrations.
+
+5.png  Linear navigation strip
+       TAKEN: quiet top bar, a single hairline under it, one compact action on the right.
+
+8.png  "Move at AI speed" landing page
+       TAKEN: faint background grid lines, a single accent colour used sparingly.
+       NOT TAKEN: the lime accent (ours is ember, and only for live states).
+
+7.png  Capitalio dashboard
+       TAKEN: collapsible sidebar with grouped sections, user block at the bottom, a dense
+              strip of figures across the top.
+       NOT TAKEN: blue and green fills, rounded cards, charts.
+
+4.png  Aura Store dashboard
+       TAKEN: dense table with small state marks, compact header row.
+       NOT TAKEN: gradient colour cards (banned).
+
+3.png  "Project Overview" glass dashboard
+       TAKEN: information density, grouping related panels.
+       NOT TAKEN: glassmorphism and blue glow (banned).
+
+6.png  Stripe-style product frames
+       TAKEN: showing real product UI inside a frame, mono numerals for figures.
+       NOT TAKEN: purple and orange gradients (banned).

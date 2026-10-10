@@ -1,0 +1,6 @@
+dist
+# Reference screenshots are other companies' work: kept locally for mood, never published.
+design/references/*.png
+design/references/*.jpg
+design/references/*.jpeg
+design/references/*.webp

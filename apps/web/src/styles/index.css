@@ -1,0 +1,171 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * FlagForge design tokens: "Control room blueprint".
+ * Every colour, font and radius used in the app is defined here. See design/DESIGN.md.
+ *
+ * `--color-*: initial` deletes Tailwind's whole default palette, so `bg-blue-500` and friends
+ * simply do not exist. If a colour is not a token, it cannot be used by accident.
+ */
+@theme {
+  --color-*: initial;
+
+  --color-canvas: #0c0c0b; /* page background ("bg") */
+  --color-raised: #141412; /* panels, inputs, anything lifted one step */
+  --color-hairline: #26241f; /* every border and divider */
+  --color-ink: #e8e4dc; /* primary text ("text") */
+  --color-muted: #8a867d; /* secondary text, captions */
+  --color-ember: #ff5a1f; /* ONLY live / on / active */
+  --color-danger: #e5484d; /* destructive actions and errors */
+
+  /* Derived steps, kept deliberately few. */
+  --color-sunken: #080807; /* wells and code blocks, one step below canvas */
+  --color-line-strong: #3a372f; /* hairline on hover / focus */
+  --color-faint: #5c5952; /* decorative marks: crosshairs, FIG captions */
+
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+
+  /* Shape: nothing rounder than 4px. */
+  --radius-*: initial;
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+
+  --shadow-*: initial; /* no drop shadows: depth comes from hairlines, not blur */
+
+  --text-2xs: 0.6875rem; /* 11px mono captions */
+  --text-2xs--line-height: 1rem;
+
+  --ease-out-quart: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-sweep: sweep 1.6s linear infinite;
+  --animate-scan: scan 3.2s linear infinite;
+
+  @keyframes sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes scan {
+    from {
+      transform: translateY(-100%);
+    }
+    to {
+      transform: translateY(100%);
+    }
+  }
+}
+
+@layer base {
+  html {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    color-scheme: dark;
+  }
+
+  body {
+    min-height: 100dvh;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-hairline);
+  }
+
+  ::selection {
+    background: var(--color-ink);
+    color: var(--color-canvas);
+  }
+
+  /* One focus style everywhere: a crisp ink outline, never a glow. */
+  :focus-visible {
+    outline: 1px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  /* Numbers line up in columns wherever mono is used. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "zero";
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-hairline) transparent;
+  }
+}
+
+/* The single serif accent word allowed per headline. */
+@utility accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* Mono caption style: "FIG 0.1", table headers, keys. */
+@utility caption {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Film grain: one static noise texture over everything. It is never animated (static by brief),
+ * ignores pointer events, and is hidden from assistive tech by the component that renders it.
+ */
+@utility grain {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 220px 220px;
+  opacity: 0.045;
+  mix-blend-mode: overlay;
+}
+
+/* Faint drafting grid. Marketing surfaces only, never inside the dashboard. */
+@utility grid-lines {
+  background-image:
+    linear-gradient(to right, var(--color-hairline) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-hairline) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 30%, transparent 78%);
+  opacity: 0.55;
+}
+
+/* Looping decoration stops when its container is offscreen or the tab is hidden (see motion/useOffscreenPause). */
+[data-paused="true"] * {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
