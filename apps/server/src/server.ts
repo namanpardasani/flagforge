@@ -10,6 +10,8 @@ const { prisma } = await import("./db.js");
 
 const app = createApp({
   logger,
+  config,
+  prisma,
   checkDatabase: async () => {
     await prisma.$queryRaw`SELECT 1`;
   },
