@@ -21,6 +21,9 @@ Running log of decisions, tradeoffs, failure answers, and interview Q&A.
 | Auth tokens | Access JWT (HS256, 15 min, algorithm pinned) plus opaque refresh token (7 days, stored as SHA-256 hash, rotated on each use; reuse of an old token revokes all the user's tokens). Refresh uses an atomic updateMany so two simultaneous refreshes cannot both succeed |
 | Login errors | Same 401 for unknown email and wrong password, with a dummy bcrypt compare so timing matches. Register returns 409 on duplicate email (accepted enumeration trade-off for usability) |
 | Tests use a separate DB | flagforge_test, guarded by name (must end in _test), tables truncated between tests; dev DB is never touched by tests |
+| Flags model | Boolean flags per project. FlagState holds one row per (flag, environment); no row means off, so new environments need no backfill. Flag key is unique per project and immutable. Flag/FlagState/AuditLog all carry workspaceId and every query filters on it |
+| Flag permissions | Read: VIEWER+. Create/edit/toggle: MEMBER+. Delete flag and read audit log: ADMIN+ |
+| Audit log | Each change writes an AuditLog row in the same DB transaction as the change (all or nothing). Toggles are logged only when the value really changes. actorId is SET NULL if the user is deleted, so history survives |
 | Project/environment permissions | Read: VIEWER and up. Create/delete projects and environments: ADMIN and up (structure changes are rarer and riskier than flag edits, which MEMBER will get later) |
 | Workspace permissions | Roles OWNER > ADMIN > MEMBER > VIEWER, enforced by requireWorkspaceRole middleware on the backend. Non-members get 404 (not 403) so other tenants' workspaces are invisible. Only OWNER grants/revokes/removes ADMIN; OWNER cannot be assigned, changed or removed (transfer is a later feature); members can leave. Member targets are looked up by (workspaceId, userId), so ids from other tenants are "not found" |
 
