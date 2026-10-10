@@ -1,4 +1,5 @@
-import type { Prisma, PrismaClient } from "../../generated/prisma/client.js";
+import type { PrismaClient } from "../../generated/prisma/client.js";
+import { writeAudit } from "../audit.js";
 import { AppError } from "../errors.js";
 import type { CreateFlagInput, UpdateFlagInput } from "./schemas.js";
 
@@ -41,19 +42,6 @@ function present(flag: FlagRow, environments: EnvRow[]) {
   };
 }
 
-async function writeAudit(
-  tx: Prisma.TransactionClient,
-  entry: {
-    workspaceId: string;
-    actorId: string;
-    action: string;
-    entityId: string;
-    metadata: Prisma.InputJsonValue;
-  },
-) {
-  await tx.auditLog.create({ data: { ...entry, entityType: "flag" } });
-}
-
 /** All queries are filtered by workspaceId; a change and its audit entry share one transaction. */
 export function createFlagService(prisma: PrismaClient) {
   async function requireProject(workspaceId: string, projectId: string) {
@@ -65,7 +53,7 @@ export function createFlagService(prisma: PrismaClient) {
     return prisma.environment.findMany({
       where: { projectId, workspaceId },
       select: { id: true, key: true, name: true },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
   }
 
@@ -89,6 +77,7 @@ export function createFlagService(prisma: PrismaClient) {
           await writeAudit(tx, {
             workspaceId,
             actorId,
+            entityType: "flag",
             action: "flag.created",
             entityId: created.id,
             metadata: { key: created.key, projectId },
@@ -130,6 +119,7 @@ export function createFlagService(prisma: PrismaClient) {
         await writeAudit(tx, {
           workspaceId,
           actorId,
+          entityType: "flag",
           action: "flag.updated",
           entityId: flagId,
           metadata: { key: existing.key, changed: Object.keys(data) },
@@ -146,6 +136,7 @@ export function createFlagService(prisma: PrismaClient) {
         await writeAudit(tx, {
           workspaceId,
           actorId,
+          entityType: "flag",
           action: "flag.deleted",
           entityId: flagId,
           metadata: { key: existing.key, projectId },
@@ -181,6 +172,7 @@ export function createFlagService(prisma: PrismaClient) {
           await writeAudit(tx, {
             workspaceId,
             actorId,
+            entityType: "flag",
             action: "flag.toggled",
             entityId: flagId,
             metadata: { key: flag.key, environmentId, environmentKey: environment.key, from, to: enabled },

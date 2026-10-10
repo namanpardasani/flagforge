@@ -40,13 +40,14 @@ beforeEach(async () => {
   for (const [u, role] of [[admin, "ADMIN"], [member, "MEMBER"], [viewer, "VIEWER"]] as const) {
     await post(owner, `/workspaces/${wsId}/members`, { email: u.email, role });
   }
-  projectId = (await post(owner, `/workspaces/${wsId}/projects`, { name: "Web", key: "web" })).body.id;
-  devId = (await post(owner, `/workspaces/${wsId}/projects/${projectId}/environments`, { name: "Dev", key: "dev" })).body.id;
-  prodId = (await post(owner, `/workspaces/${wsId}/projects/${projectId}/environments`, { name: "Prod", key: "prod" })).body.id;
-  otherProjectId = (await post(outsider, `/workspaces/${otherWsId}/projects`, { name: "Secret", key: "secret" })).body.id;
-  otherEnvId = (
-    await post(outsider, `/workspaces/${otherWsId}/projects/${otherProjectId}/environments`, { name: "Prod", key: "prod" })
-  ).body.id;
+  // Creating a project also creates its dev, staging and prod environments.
+  const project = (await post(owner, `/workspaces/${wsId}/projects`, { name: "Web", key: "web" })).body;
+  projectId = project.id;
+  devId = project.environments.find((e: { key: string }) => e.key === "dev").id;
+  prodId = project.environments.find((e: { key: string }) => e.key === "prod").id;
+  const other = (await post(outsider, `/workspaces/${otherWsId}/projects`, { name: "Secret", key: "secret" })).body;
+  otherProjectId = other.id;
+  otherEnvId = other.environments[0].id;
 });
 
 describe("creating and reading flags", () => {
@@ -56,6 +57,7 @@ describe("creating and reading flags", () => {
     expect(res.body).toMatchObject({ key: "new-checkout", name: "New checkout", description: "redesign" });
     expect(res.body.environments).toMatchObject([
       { environmentId: devId, key: "dev", enabled: false },
+      { key: "staging", enabled: false },
       { environmentId: prodId, key: "prod", enabled: false },
     ]);
   });
@@ -78,12 +80,12 @@ describe("creating and reading flags", () => {
   it("lists flags with per-environment state, including environments created later", async () => {
     const flag = (await createFlag(owner)).body;
     await toggle(owner, flag.id, devId, true);
-    const staging = (await post(owner, `/workspaces/${wsId}/projects/${projectId}/environments`, { name: "Staging", key: "staging" })).body;
+    const qa = (await post(owner, `/workspaces/${wsId}/projects/${projectId}/environments`, { name: "QA", key: "qa" })).body;
     const list = await get(viewer, flagsUrl(wsId, projectId));
     expect(list.status).toBe(200);
     const states = Object.fromEntries(list.body.flags[0].environments.map((e: { key: string; enabled: boolean }) => [e.key, e.enabled]));
-    expect(states).toEqual({ dev: true, prod: false, staging: false });
-    expect(list.body.flags[0].environments.some((e: { environmentId: string }) => e.environmentId === staging.id)).toBe(true);
+    expect(states).toEqual({ dev: true, staging: false, prod: false, qa: false });
+    expect(list.body.flags[0].environments.some((e: { environmentId: string }) => e.environmentId === qa.id)).toBe(true);
   });
 
   it("gets, updates and clears the description of a flag", async () => {
@@ -104,7 +106,7 @@ describe("toggling", () => {
     const res = await toggle(member, flag.id, prodId, true);
     expect(res.status).toBe(200);
     const states = Object.fromEntries(res.body.environments.map((e: { key: string; enabled: boolean }) => [e.key, e.enabled]));
-    expect(states).toEqual({ dev: false, prod: true });
+    expect(states).toEqual({ dev: false, staging: false, prod: true });
   });
 
   it("requires a real boolean", async () => {
@@ -264,8 +266,8 @@ describe("tenant isolation", () => {
     expect(foreign.status).toBe(404);
     expect(foreign.body.error.code).toBe("ENVIRONMENT_NOT_FOUND");
 
-    const sibling = (await post(owner, `/workspaces/${wsId}/projects`, { name: "Mobile", key: "mobile" })).body.id;
-    const siblingEnv = (await post(owner, `/workspaces/${wsId}/projects/${sibling}/environments`, { name: "Prod", key: "prod" })).body.id;
+    const sibling = (await post(owner, `/workspaces/${wsId}/projects`, { name: "Mobile", key: "mobile" })).body;
+    const siblingEnv = sibling.environments[0].id;
     const crossProject = await toggle(owner, flag.id, siblingEnv, true);
     expect(crossProject.status).toBe(404);
     expect(await prisma.flagState.count()).toBe(0);

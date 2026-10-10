@@ -2,6 +2,12 @@ import type { PrismaClient } from "../../generated/prisma/client.js";
 import { AppError } from "../errors.js";
 import type { CreateEnvironmentInput, CreateProjectInput } from "./schemas.js";
 
+const DEFAULT_ENVIRONMENTS = [
+  { name: "Development", key: "dev" },
+  { name: "Staging", key: "staging" },
+  { name: "Production", key: "prod" },
+] as const;
+
 const environmentSelect = { id: true, name: true, key: true, createdAt: true } as const;
 const projectNotFound = () => new AppError(404, "PROJECT_NOT_FOUND", "Project not found");
 const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === "P2002";
@@ -24,7 +30,18 @@ export function createProjectService(prisma: PrismaClient) {
   return {
     async createProject(workspaceId: string, input: CreateProjectInput) {
       try {
-        return await prisma.project.create({ data: { workspaceId, name: input.name, key: input.key } });
+        // Project and its default environments are created together or not at all.
+        return await prisma.project.create({
+          data: {
+            workspaceId,
+            name: input.name,
+            key: input.key,
+            environments: {
+              create: DEFAULT_ENVIRONMENTS.map((e) => ({ workspaceId, name: e.name, key: e.key })),
+            },
+          },
+          include: { environments: { select: environmentSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
+        });
       } catch (err) {
         if (isUniqueViolation(err)) {
           throw new AppError(409, "PROJECT_KEY_TAKEN", "A project with this key already exists in the workspace");
@@ -36,7 +53,7 @@ export function createProjectService(prisma: PrismaClient) {
     listProjects(workspaceId: string) {
       return prisma.project.findMany({
         where: { workspaceId },
-        include: { environments: { select: environmentSelect, orderBy: { createdAt: "asc" } } },
+        include: { environments: { select: environmentSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
         orderBy: { createdAt: "asc" },
       });
     },
@@ -44,7 +61,7 @@ export function createProjectService(prisma: PrismaClient) {
     async getProject(workspaceId: string, projectId: string) {
       const project = await prisma.project.findFirst({
         where: { id: projectId, workspaceId },
-        include: { environments: { select: environmentSelect, orderBy: { createdAt: "asc" } } },
+        include: { environments: { select: environmentSelect, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
       });
       if (!project) throw projectNotFound();
       return project;
@@ -76,7 +93,7 @@ export function createProjectService(prisma: PrismaClient) {
       return prisma.environment.findMany({
         where: { projectId, workspaceId },
         select: environmentSelect,
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       });
     },
 

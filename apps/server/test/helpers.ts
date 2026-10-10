@@ -24,7 +24,7 @@ export function makeApp(overrides: Partial<AppDeps> = {}) {
 /** Empties every table. Safe only because setup.ts guarantees we are on the _test database. */
 export async function resetDb() {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "AuditLog", "FlagState", "Flag", "RefreshToken", "WorkspaceMember", "Environment", "Project", "Workspace", "User" CASCADE',
+    'TRUNCATE TABLE "ApiKey", "AuditLog", "FlagState", "Flag", "RefreshToken", "WorkspaceMember", "Environment", "Project", "Workspace", "User" CASCADE',
   );
 }
 

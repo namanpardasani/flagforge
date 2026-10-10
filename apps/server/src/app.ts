@@ -3,15 +3,18 @@ import express from "express";
 import helmet from "helmet";
 import type { Logger } from "pino";
 import type { PrismaClient } from "../generated/prisma/client.js";
+import { createApiKeyService } from "./apikeys/service.js";
 import { createAuthService } from "./auth/service.js";
 import type { Config } from "./config.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { requestLogger } from "./middleware/request-logger.js";
 import { createFlagService } from "./flags/service.js";
 import { createProjectService } from "./projects/service.js";
+import { apiKeysRouter } from "./routes/api-keys.js";
 import { authRouter } from "./routes/auth.js";
 import { flagsRouter } from "./routes/flags.js";
 import { projectsRouter } from "./routes/projects.js";
+import { sdkRouter } from "./routes/sdk.js";
 import { workspacesRouter } from "./routes/workspaces.js";
 import { createWorkspaceService } from "./workspaces/service.js";
 import { healthRouter, type DatabaseCheck } from "./routes/health.js";
@@ -37,6 +40,8 @@ export function createApp({ logger, config, prisma, checkDatabase }: AppDeps) {
   app.use(workspacesRouter(createWorkspaceService(prisma), prisma, config));
   app.use(projectsRouter(createProjectService(prisma), prisma, config));
   app.use(flagsRouter(createFlagService(prisma), prisma, config));
+  app.use(apiKeysRouter(createApiKeyService(prisma), prisma, config));
+  app.use(sdkRouter(prisma));
 
   // Order matters: 404 first, then the error handler must be last.
   app.use(notFoundHandler);

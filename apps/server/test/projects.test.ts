@@ -54,7 +54,10 @@ describe("projects", () => {
     expect(res.body).toMatchObject({ name: "Mobile", key: "mobile", workspaceId: wsId });
     const got = await api.getProject(viewer, wsId, res.body.id);
     expect(got.status).toBe(200);
-    expect(got.body.environments).toEqual([]);
+    expect(res.body.environments.map((e: { key: string }) => e.key)).toEqual(["dev", "staging", "prod"]);
+    expect(got.body.environments.map((e: { key: string }) => e.key)).toEqual(["dev", "staging", "prod"]);
+    const rows = await prisma.environment.findMany({ where: { projectId: res.body.id } });
+    expect(rows.every((e) => e.workspaceId === wsId)).toBe(true);
   });
 
   it("allows the same key in different workspaces but not twice in one", async () => {
@@ -78,10 +81,10 @@ describe("projects", () => {
   });
 
   it("deletes a project and its environments", async () => {
-    const env = (await api.createEnv(owner, wsId, projectId, { name: "Prod", key: "prod" })).body;
+    expect(await prisma.environment.count({ where: { projectId } })).toBe(3);
     expect((await api.deleteProject(admin, wsId, projectId)).status).toBe(204);
     expect((await api.getProject(owner, wsId, projectId)).status).toBe(404);
-    expect(await prisma.environment.findUnique({ where: { id: env.id } })).toBeNull();
+    expect(await prisma.environment.count({ where: { projectId } })).toBe(0);
   });
 });
 
@@ -102,16 +105,16 @@ describe("environments", () => {
   });
 
   it("ignores a workspaceId smuggled into the request body", async () => {
-    const res = await api.createEnv(owner, wsId, projectId, { name: "Dev", key: "dev", workspaceId: otherWsId });
+    const res = await api.createEnv(owner, wsId, projectId, { name: "QA", key: "qa", workspaceId: otherWsId });
     expect(res.status).toBe(201);
     const row = await prisma.environment.findUniqueOrThrow({ where: { id: res.body.id } });
     expect(row.workspaceId).toBe(wsId);
   });
 
   it("lists and deletes environments", async () => {
-    const env = (await api.createEnv(owner, wsId, projectId, { name: "Dev", key: "dev" })).body;
+    const env = (await api.createEnv(owner, wsId, projectId, { name: "QA", key: "qa" })).body;
     const list = await api.listEnvs(viewer, wsId, projectId);
-    expect(list.body.environments.map((e: { id: string }) => e.id)).toEqual([env.id]);
+    expect(list.body.environments.map((e: { key: string }) => e.key)).toEqual(["dev", "staging", "prod", "qa"]);
     expect((await api.deleteEnv(admin, wsId, projectId, env.id)).status).toBe(204);
     expect((await api.deleteEnv(admin, wsId, projectId, env.id)).status).toBe(404);
   });
@@ -132,7 +135,7 @@ describe("tenant isolation", () => {
       expect(res.body.error.code).toBe("WORKSPACE_NOT_FOUND");
     }
     expect(await prisma.project.count({ where: { workspaceId: wsId } })).toBe(1);
-    expect(await prisma.environment.count({ where: { workspaceId: wsId } })).toBe(0);
+    expect(await prisma.environment.count({ where: { workspaceId: wsId } })).toBe(3); // only the defaults
   });
 
   it("cannot reach another workspace's project through your own workspace id", async () => {
@@ -148,11 +151,11 @@ describe("tenant isolation", () => {
       expect(res.body.error.code).toBe("PROJECT_NOT_FOUND");
     }
     expect(await prisma.project.findUnique({ where: { id: otherProjectId } })).not.toBeNull();
-    expect(await prisma.environment.count({ where: { projectId: otherProjectId } })).toBe(0);
+    expect(await prisma.environment.count({ where: { projectId: otherProjectId } })).toBe(3); // only the defaults
   });
 
   it("cannot delete another workspace's environment via your own project path", async () => {
-    const victimEnv = (await api.createEnv(outsider, otherWsId, otherProjectId, { name: "Prod", key: "prod" })).body;
+    const victimEnv = (await api.getProject(outsider, otherWsId, otherProjectId)).body.environments[0];
     const res = await api.deleteEnv(owner, wsId, projectId, victimEnv.id);
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("ENVIRONMENT_NOT_FOUND");
@@ -176,7 +179,7 @@ describe("permissions", () => {
   });
 
   it("forbids MEMBER and VIEWER from creating or deleting projects and environments", async () => {
-    const env = (await api.createEnv(owner, wsId, projectId, { name: "Dev", key: "dev" })).body;
+    const env = (await api.createEnv(owner, wsId, projectId, { name: "QA", key: "qa" })).body;
     for (const u of [member, viewer]) {
       expect((await api.createProject(u, wsId, { name: "Nope", key: "nope" })).status).toBe(403);
       expect((await api.deleteProject(u, wsId, projectId)).status).toBe(403);
@@ -184,13 +187,13 @@ describe("permissions", () => {
       expect((await api.deleteEnv(u, wsId, projectId, env.id)).status).toBe(403);
     }
     expect(await prisma.project.count({ where: { workspaceId: wsId } })).toBe(1);
-    expect(await prisma.environment.count({ where: { projectId } })).toBe(1);
+    expect(await prisma.environment.count({ where: { projectId } })).toBe(4); // 3 defaults + qa
   });
 
   it("lets ADMIN manage projects and environments", async () => {
     const p = await api.createProject(admin, wsId, { name: "Admin Proj", key: "admin-proj" });
     expect(p.status).toBe(201);
-    expect((await api.createEnv(admin, wsId, p.body.id, { name: "Dev", key: "dev" })).status).toBe(201);
+    expect((await api.createEnv(admin, wsId, p.body.id, { name: "QA", key: "qa" })).status).toBe(201);
     expect((await api.deleteProject(admin, wsId, p.body.id)).status).toBe(204);
   });
 });
