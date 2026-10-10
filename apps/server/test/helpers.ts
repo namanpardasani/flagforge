@@ -9,6 +9,9 @@ export const testConfig = loadConfig({
   ...process.env,
   JWT_ACCESS_SECRET: "test-secret-test-secret-test-secret-123456",
   BCRYPT_ROUNDS: "4", // fast hashing; real value is 12
+  SSE_HEARTBEAT_MS: "150", // fast timers so stream tests do not need long waits
+  SSE_REVALIDATE_MS: "300",
+  SSE_MAX_CONNECTIONS_PER_KEY: "3",
 });
 
 export function makeApp(overrides: Partial<AppDeps> = {}) {

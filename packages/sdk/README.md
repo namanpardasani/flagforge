@@ -22,23 +22,26 @@ if (flags.isEnabled("new-checkout", { key: user.id, attributes: { plan: user.pla
 
 | Situation | What happens |
 |---|---|
-| Normal | Config is cached in memory; polled every 30s with `If-None-Match` (unchanged = tiny 304 response). |
+| Normal | Config is cached in memory. A real-time stream (SSE) announces changes, so they arrive within moments (about 25ms on a local machine). Polling stays on as a safety net: every 30s normally, every 5 min while the stream is healthy, always with `If-None-Match` (unchanged = tiny 304 response). |
+| Stream drops | Reconnects with exponential backoff and jitter. Every reconnect starts with the server's current version, so changes missed while disconnected are fetched immediately. Meanwhile polling returns to the normal rate. A silent connection (no heartbeat for 60s) is treated as dead and replaced. |
+| Too many streams for one key (429) | The client keeps working through polling and keeps retrying the stream. |
 | Server unreachable at startup | Falls back to the on-disk copy (`storage`), then `bootstrap`, then your default value. Polling keeps retrying and switches to live data when the server returns. |
 | Server goes down later | Keeps serving the last known config (availability over freshness). Retries with exponential backoff and jitter. |
 | Bad or garbled response | Ignored. A good cached config is never replaced by an invalid one. |
-| API key revoked (401/403) | Polling stops (`status.fatal`), the last config keeps being served, an `error` event fires. |
+| API key revoked (401/403) | The server closes the key's streams at once. Streaming and polling stop (`status.fatal`), the last config keeps being served, an `error` event fires. |
 
 `evaluate()` / `isEnabled()` never throw. `defaultValue` is used only when no decision can be made
 (not ready, unknown flag, missing user key). A known flag that is simply off returns `false`.
 
 ## API
 
-- `new FlagForgeClient({ apiKey, baseUrl, pollIntervalMs?, requestTimeoutMs?, maxBackoffMs?, storage?, bootstrap?, allowInsecureHttp? })`
+- `new FlagForgeClient({ apiKey, baseUrl, streaming?, pollIntervalMs?, streamPollIntervalMs?, streamIdleTimeoutMs?, requestTimeoutMs?, maxBackoffMs?, storage?, bootstrap?, allowInsecureHttp? })` (`streaming` defaults to true)
 - `await client.init()` -> `{ ready, source: "network" | "storage" | "bootstrap" | "none" }`
 - `client.isEnabled(flagKey, user, defaultValue = false)` -> `boolean`
 - `client.evaluate(flagKey, user, defaultValue = false)` -> `{ value, reason, ruleId? }`
   (`reason`: `OFF`, `RULE_MATCH`, `FALLTHROUGH`, `FLAG_NOT_FOUND`, `NOT_READY`, `ERROR`)
-- `client.allFlags(user)`, `client.refresh()`, `client.status`, `client.close()`
+- `client.allFlags(user)`, `client.refresh()`, `client.close()`
+- `client.status` -> `{ ready, source, stream: "off" | "connecting" | "connected" | "disconnected", version?, consecutiveFailures, lastSuccessAt?, fatal }`
 - `client.on("ready" | "update" | "error", listener)` returns an unsubscribe function
 
 `user` is `{ key: string, attributes?: Record<string, string | number | boolean | string[]> }`.

@@ -9,6 +9,7 @@ import type { Config } from "./config.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { requestLogger } from "./middleware/request-logger.js";
 import { createFlagService } from "./flags/service.js";
+import { createRealtime, type Realtime } from "./realtime/index.js";
 import { createProjectService } from "./projects/service.js";
 import { apiKeysRouter } from "./routes/api-keys.js";
 import { authRouter } from "./routes/auth.js";
@@ -24,10 +25,12 @@ export interface AppDeps {
   config: Config;
   prisma: PrismaClient;
   checkDatabase: DatabaseCheck;
+  /** Event bus + SSE streams. Created automatically when omitted; pass one to control shutdown. */
+  realtime?: Realtime;
 }
 
 /** Builds the Express app without listening on a port, so tests can import it. */
-export function createApp({ logger, config, prisma, checkDatabase }: AppDeps) {
+export function createApp({ logger, config, prisma, checkDatabase, realtime = createRealtime(prisma, config) }: AppDeps) {
   const app = express();
 
   app.use(requestLogger(logger));
@@ -39,9 +42,9 @@ export function createApp({ logger, config, prisma, checkDatabase }: AppDeps) {
   app.use(authRouter(createAuthService(prisma, config), config));
   app.use(workspacesRouter(createWorkspaceService(prisma), prisma, config));
   app.use(projectsRouter(createProjectService(prisma), prisma, config));
-  app.use(flagsRouter(createFlagService(prisma), prisma, config));
-  app.use(apiKeysRouter(createApiKeyService(prisma), prisma, config));
-  app.use(sdkRouter(prisma));
+  app.use(flagsRouter(createFlagService(prisma, realtime.bus), prisma, config));
+  app.use(apiKeysRouter(createApiKeyService(prisma, realtime.bus), prisma, config));
+  app.use(sdkRouter(prisma, realtime.streams));
 
   // Order matters: 404 first, then the error handler must be last.
   app.use(notFoundHandler);

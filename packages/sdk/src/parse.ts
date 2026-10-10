@@ -34,5 +34,13 @@ export function parseSnapshot(body: unknown): ConfigSnapshot {
       }
     }
   }
-  return { environment: { id: env["id"], key: env["key"] }, flags: flags as FlagConfig[] };
+  const version = body["version"];
+  if (version !== undefined && !(typeof version === "number" && Number.isInteger(version) && version >= 0)) {
+    throw new Error("config.version is invalid");
+  }
+  return {
+    environment: { id: env["id"], key: env["key"] },
+    ...(version !== undefined ? { version } : {}),
+    flags: flags as FlagConfig[],
+  };
 }

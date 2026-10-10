@@ -3,6 +3,8 @@ import type { EvaluationReason, FlagConfig } from "@flagforge/core";
 /** Everything the server sends from GET /sdk/v1/flags. */
 export interface ConfigSnapshot {
   environment: { id: string; key: string };
+  /** Increases every time this environment's config changes. Absent on older servers. */
+  version?: number;
   flags: FlagConfig[];
 }
 
@@ -38,6 +40,15 @@ export interface FlagForgeOptions {
   fetch?: typeof fetch;
   /** Opt in to sending the API key over plain http to a non-local host. Do not do this in production. */
   allowInsecureHttp?: boolean;
+  /**
+   * Keep a real-time stream open so changes arrive within moments instead of at the next poll.
+   * Polling stays on as a safety net. Default true.
+   */
+  streaming?: boolean;
+  /** While the stream is healthy, poll this rarely (only a safety net). Default 300000 (5 min). */
+  streamPollIntervalMs?: number;
+  /** Reconnect if the stream is silent this long (the server sends heartbeats about every 25s). Default 60000. */
+  streamIdleTimeoutMs?: number;
 }
 
 /** Why a value was returned. The first three come from @flagforge/core; the rest are SDK fallbacks. */
@@ -51,12 +62,18 @@ export interface EvaluationDetail {
 
 export type ConfigSource = "network" | "storage" | "bootstrap" | "none";
 
+/** "off" means streaming is disabled. */
+export type StreamState = "off" | "connecting" | "connected" | "disconnected";
+
 export interface ClientStatus {
   ready: boolean;
   source: ConfigSource;
   /** Epoch ms of the last successful contact with the server. */
   lastSuccessAt?: number;
   consecutiveFailures: number;
+  stream: StreamState;
+  /** Version of the config currently being served, when the server reports one. */
+  version?: number;
   /** True after a 401/403: polling has stopped until you create a new client. */
   fatal: boolean;
 }

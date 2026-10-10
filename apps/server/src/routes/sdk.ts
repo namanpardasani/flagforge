@@ -4,6 +4,7 @@ import { Router, type Request, type Response } from "express";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { AppError } from "../errors.js";
 import { requireApiKey } from "../middleware/require-api-key.js";
+import type { StreamManager } from "../realtime/streams.js";
 import { validate } from "../middleware/validate.js";
 import { loadFlagConfig, loadFlagConfigs } from "../sdk/configs.js";
 import { evaluateAllSchema, evaluateSchema } from "../sdk/schemas.js";
@@ -36,18 +37,30 @@ function sendConditionalJson(req: Request, res: Response, payload: unknown) {
  * Endpoints called by server-side SDKs, authenticated with an environment API key (not a user JWT).
  * The key fixes the tenant, project and environment, so nothing here accepts those from the client.
  */
-export function sdkRouter(prisma: PrismaClient): Router {
+export function sdkRouter(prisma: PrismaClient, streams: StreamManager): Router {
   const router = Router();
   const apiKey = requireApiKey(prisma);
 
   // The full configuration, so an SDK can cache it and evaluate locally with @flagforge/core.
   router.get("/sdk/v1/flags", apiKey, async (req, res) => {
-    const { environmentId, environmentKey } = req.sdk!;
+    const { environmentId, environmentKey, workspaceId } = req.sdk!;
+    // Read the version BEFORE the flags. If a change lands in between, the flags are newer than the
+    // version we report, so the SDK just refetches once more. Reading in the other order could label
+    // old flags with a new version, and the SDK would then never fetch the change.
+    const env = await prisma.environment.findFirst({
+      where: { id: environmentId, workspaceId },
+      select: { configVersion: true },
+    });
+    if (!env) throw new AppError(401, "INVALID_API_KEY", "Missing, invalid or revoked API key");
     sendConditionalJson(req, res, {
       environment: { id: environmentId, key: environmentKey },
+      version: env.configVersion,
       flags: await loadFlagConfigs(prisma, req.sdk!),
     });
   });
+
+  // Real-time doorbell: tells the SDK "your environment is now at version N" (see StreamManager).
+  router.get("/sdk/v1/stream", apiKey, (req, res) => streams.handle(req, res));
 
   // Server-side evaluation of one flag, for clients that do not want to run the engine themselves.
   router.post("/sdk/v1/evaluate", apiKey, validate(evaluateSchema), async (req, res) => {

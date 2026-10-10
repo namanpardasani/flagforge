@@ -10,6 +10,11 @@ const envSchema = z.object({
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(7),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
+  // Real-time streams (SSE). The heartbeat keeps proxies from closing idle connections.
+  SSE_HEARTBEAT_MS: z.coerce.number().int().min(50).default(25_000),
+  SSE_REVALIDATE_MS: z.coerce.number().int().min(100).default(60_000),
+  SSE_MAX_CONNECTIONS: z.coerce.number().int().min(1).default(2000),
+  SSE_MAX_CONNECTIONS_PER_KEY: z.coerce.number().int().min(1).default(50),
 });
 
 export type Config = z.infer<typeof envSchema>;

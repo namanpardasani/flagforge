@@ -1,5 +1,6 @@
 import { evaluateFlag, type EvaluationContext, type FlagConfig } from "@flagforge/core";
 import { parseSnapshot } from "./parse.js";
+import { SseParser } from "./sse.js";
 import {
   FlagForgeError,
   type ClientEvents,
@@ -8,6 +9,7 @@ import {
   type ConfigSource,
   type EvaluationDetail,
   type FlagForgeOptions,
+  type StreamState,
 } from "./types.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -18,12 +20,16 @@ export class FlagForgeClient {
   readonly #pollIntervalMs: number;
   readonly #requestTimeoutMs: number;
   readonly #maxBackoffMs: number;
+  readonly #streaming: boolean;
+  readonly #streamPollIntervalMs: number;
+  readonly #streamIdleTimeoutMs: number;
   readonly #options: FlagForgeOptions;
   readonly #fetch: typeof fetch;
 
   #flags = new Map<string, FlagConfig>();
   #snapshot: ConfigSnapshot | undefined;
   #etag: string | undefined;
+  #version: number | undefined;
   #ready = false;
   #source: ConfigSource = "none";
   #lastSuccessAt: number | undefined;
@@ -34,6 +40,13 @@ export class FlagForgeClient {
   #inflight: Promise<boolean> | undefined;
   #abort: AbortController | undefined;
   #initPromise: Promise<{ ready: boolean; source: ConfigSource }> | undefined;
+
+  #streamState: StreamState;
+  #streamAbort: AbortController | undefined;
+  readonly #sleepers = new Set<() => void>();
+  #wantVersion = -1;
+  #catchingUp = false;
+
   #listeners: { [K in keyof ClientEvents]: Set<ClientEvents[K]> } = {
     ready: new Set(),
     update: new Set(),
@@ -58,6 +71,10 @@ export class FlagForgeClient {
     this.#pollIntervalMs = options.pollIntervalMs ?? 30_000;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 5_000;
     this.#maxBackoffMs = options.maxBackoffMs ?? 300_000;
+    this.#streaming = options.streaming ?? true;
+    this.#streamPollIntervalMs = options.streamPollIntervalMs ?? 300_000;
+    this.#streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? 60_000;
+    this.#streamState = this.#streaming ? "connecting" : "off";
     this.#options = options;
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
@@ -83,9 +100,9 @@ export class FlagForgeClient {
   // ---- lifecycle ----------------------------------------------------------------------------
 
   /**
-   * Loads flags (network first, then storage, then bootstrap) and starts background polling.
-   * Never rejects: check `ready` in the result. If it is false, evaluations return your defaults
-   * until the first successful fetch, which polling keeps retrying in the background.
+   * Loads flags (network first, then storage, then bootstrap), starts background polling and, if
+   * enabled, the real-time stream. Never rejects: check `ready` in the result. If it is false,
+   * evaluations return your defaults until the first successful fetch, which keeps being retried.
    */
   init(): Promise<{ ready: boolean; source: ConfigSource }> {
     this.#initPromise ??= this.#init();
@@ -96,6 +113,7 @@ export class FlagForgeClient {
     const ok = await this.refresh();
     if (!ok && !this.#ready) await this.#loadFallback();
     this.#schedule();
+    if (this.#streaming && !this.#closed && !this.#fatal) void this.#streamLoop();
     return { ready: this.#ready, source: this.#source };
   }
 
@@ -199,6 +217,7 @@ export class FlagForgeClient {
     this.#snapshot = snapshot;
     this.#flags = new Map(snapshot.flags.map((f) => [f.key, f])); // replaced in one step: no half-updated reads
     this.#etag = etag;
+    this.#version = snapshot.version;
     return changed;
   }
 
@@ -216,12 +235,18 @@ export class FlagForgeClient {
     storage.save(stored).catch((err) => this.#emit("error", new FlagForgeError("could not save config cache", { cause: err })));
   }
 
+  // ---- polling ------------------------------------------------------------------------------
+
   #schedule() {
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = undefined;
     if (this.#closed || this.#fatal || this.#pollIntervalMs <= 0) return;
-    // Healthy: poll on the interval. Failing: back off exponentially so we do not hammer a struggling server.
+    // Healthy: poll on the interval, but only as a rare safety net while the stream is connected.
+    // Failing: back off exponentially so we do not hammer a struggling server.
+    const healthy = this.#streamState === "connected" ? Math.max(this.#pollIntervalMs, this.#streamPollIntervalMs) : this.#pollIntervalMs;
     const base =
       this.#failures === 0
-        ? this.#pollIntervalMs
+        ? healthy
         : Math.min(this.#maxBackoffMs, Math.max(this.#pollIntervalMs, 1000) * 2 ** Math.min(this.#failures, 10));
     const delay = base * (0.9 + Math.random() * 0.2); // jitter so a fleet of clients does not poll in lockstep
     this.#timer = setTimeout(async () => {
@@ -231,12 +256,168 @@ export class FlagForgeClient {
     this.#timer.unref?.(); // polling alone must not keep the process alive
   }
 
-  /** Stops polling and cancels any request in flight. Evaluation keeps working with the last config. */
+  // ---- real-time stream ---------------------------------------------------------------------
+
+  #setStream(state: StreamState) {
+    if (this.#streamState === state) return;
+    this.#streamState = state;
+    // Stream up -> poll rarely; stream down -> poll at the normal rate until it is back.
+    this.#schedule();
+  }
+
+  async #streamLoop() {
+    let attempt = 0;
+    while (!this.#closed && !this.#fatal) {
+      let connected = false;
+      try {
+        this.#setStream("connecting");
+        await this.#runStream(() => {
+          connected = true;
+        });
+      } catch (err) {
+        if (this.#closed) break;
+        const error = err instanceof FlagForgeError ? err : new FlagForgeError("stream error", { cause: err });
+        if (error.fatal) this.#fatal = true;
+        this.#emit("error", error);
+      } finally {
+        this.#setStream("disconnected");
+      }
+      if (this.#closed || this.#fatal) break;
+      // A connection that worked resets the backoff, so a deploy-time restart reconnects quickly.
+      attempt = connected ? 0 : attempt + 1;
+      const base = Math.min(this.#maxBackoffMs, 1000 * 2 ** Math.min(attempt, 10));
+      await this.#sleep(base * (0.9 + Math.random() * 0.2));
+    }
+    if (this.#fatal) this.#schedule(); // clears the poll timer
+  }
+
+  async #runStream(onConnected: () => void): Promise<void> {
+    const controller = new AbortController();
+    this.#streamAbort = controller;
+    let reason: "timeout" | "idle" | undefined;
+    const connectTimer = setTimeout(() => {
+      reason = "timeout";
+      controller.abort();
+    }, this.#requestTimeoutMs);
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const armIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        reason = "idle";
+        controller.abort();
+      }, this.#streamIdleTimeoutMs);
+    };
+
+    try {
+      let res: Response;
+      try {
+        res = await this.#fetch(`${this.#baseUrl}/sdk/v1/stream`, {
+          headers: {
+            Authorization: `Bearer ${this.#apiKey}`,
+            Accept: "text/event-stream",
+            ...(this.#version !== undefined ? { "Last-Event-ID": String(this.#version) } : {}),
+          },
+          signal: controller.signal,
+        });
+      } catch (err) {
+        throw new FlagForgeError(reason === "timeout" ? "stream connect timed out" : "stream network error", { cause: err });
+      }
+      clearTimeout(connectTimer);
+
+      if (res.status === 401 || res.status === 403) {
+        throw new FlagForgeError("API key was rejected (invalid or revoked)", { status: res.status, fatal: true });
+      }
+      if (!res.ok || !res.body) throw new FlagForgeError(`stream rejected with status ${res.status}`, { status: res.status });
+
+      this.#setStream("connected");
+      onConnected();
+      armIdle();
+
+      const parser = new SseParser();
+      const reader = res.body.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return; // server closed the stream: the loop reconnects
+          armIdle(); // any bytes, including heartbeats, prove the connection is alive
+          for (const message of parser.push(value)) this.#onStreamMessage(message.event, message.data);
+        }
+      } catch (err) {
+        if (this.#closed) return;
+        throw new FlagForgeError(reason === "idle" ? "stream went silent" : "stream interrupted", { cause: err });
+      }
+    } finally {
+      clearTimeout(connectTimer);
+      clearTimeout(idleTimer);
+      if (this.#streamAbort === controller) this.#streamAbort = undefined;
+      controller.abort(); // always release the connection
+    }
+  }
+
+  #onStreamMessage(event: string | undefined, data: string | undefined) {
+    if (event !== "hello" && event !== "change") return; // unknown events from newer servers are ignored
+    let version: unknown;
+    try {
+      version = (JSON.parse(data ?? "") as { version?: unknown }).version;
+    } catch {
+      return;
+    }
+    if (typeof version !== "number" || !Number.isInteger(version) || version < 0) return;
+
+    // "change": only newer versions matter. "hello": any difference (even older, e.g. after a
+    // database restore) means our copy is not what the server has, so resync.
+    const known = this.#version;
+    const needsSync = event === "hello" ? known !== version : known === undefined || version > known;
+    if (!needsSync) return;
+    this.#wantVersion = event === "hello" ? version : Math.max(this.#wantVersion, version);
+    void this.#catchUp();
+  }
+
+  /**
+   * Fetch until we have at least the version the stream announced. A fetch that was already in
+   * flight when the change committed can return stale data, so one fetch is not always enough.
+   */
+  async #catchUp() {
+    if (this.#catchingUp) return;
+    this.#catchingUp = true;
+    const target = this.#wantVersion;
+    try {
+      for (let attempt = 0; attempt < 6 && !this.#closed && !this.#fatal; attempt++) {
+        const ok = await this.refresh();
+        // Older servers report no version; one successful fetch is all we can do for them.
+        if (ok && (this.#version === undefined || this.#version >= target)) return;
+        await this.#sleep(Math.min(2000, 100 * 2 ** attempt));
+      }
+    } finally {
+      this.#catchingUp = false;
+      if (!this.#closed && this.#wantVersion > target) void this.#catchUp(); // another change arrived meanwhile
+    }
+  }
+
+  /** A sleep that close() can interrupt, and that never keeps the process alive. */
+  #sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.#closed) return resolve();
+      const done = () => {
+        clearTimeout(timer);
+        this.#sleepers.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      timer.unref?.();
+      this.#sleepers.add(done);
+    });
+  }
+
+  /** Stops polling and the stream, and cancels requests in flight. Evaluation keeps working with the last config. */
   close(): void {
     this.#closed = true;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = undefined;
     this.#abort?.abort();
+    this.#streamAbort?.abort();
+    for (const wake of [...this.#sleepers]) wake();
+    if (this.#streaming) this.#streamState = "disconnected";
   }
 
   get status(): ClientStatus {
@@ -245,6 +426,8 @@ export class FlagForgeClient {
       source: this.#source,
       ...(this.#lastSuccessAt !== undefined ? { lastSuccessAt: this.#lastSuccessAt } : {}),
       consecutiveFailures: this.#failures,
+      stream: this.#streamState,
+      ...(this.#version !== undefined ? { version: this.#version } : {}),
       fatal: this.#fatal,
     };
   }

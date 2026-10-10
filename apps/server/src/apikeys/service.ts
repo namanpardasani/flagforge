@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { writeAudit } from "../audit.js";
 import { hashToken } from "../auth/tokens.js";
+import { keyTopic, publishQuietly, type EventBus } from "../realtime/bus.js";
 import { AppError } from "../errors.js";
 
 export const API_KEY_PREFIX = "ff_";
@@ -17,7 +18,7 @@ export function generateApiKey() {
   return { key, keyHash: hashToken(key), prefix: key.slice(0, 10) };
 }
 
-export function createApiKeyService(prisma: PrismaClient) {
+export function createApiKeyService(prisma: PrismaClient, bus: EventBus) {
   /** The environment must belong to this project AND workspace, otherwise it does not exist. */
   async function requireEnvironment(workspaceId: string, projectId: string, environmentId: string) {
     const environment = await prisma.environment.findFirst({
@@ -77,6 +78,8 @@ export function createApiKeyService(prisma: PrismaClient) {
           metadata: { environmentId, environmentKey: environment.key },
         });
       });
+      // Close any open streams that were using this key right away (after the revoke is committed).
+      await publishQuietly(bus, keyTopic(apiKeyId), { type: "key_revoked", apiKeyId });
     },
   };
 }

@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 function make(overrides: Partial<FlagForgeOptions> = {}) {
-  const client = new FlagForgeClient({ apiKey: API_KEY, baseUrl: stub.url, pollIntervalMs: 0, requestTimeoutMs: 1000, ...overrides });
+  const client = new FlagForgeClient({ apiKey: API_KEY, baseUrl: stub.url, pollIntervalMs: 0, requestTimeoutMs: 1000, streaming: false, ...overrides });
   clients.push(client);
   return client;
 }

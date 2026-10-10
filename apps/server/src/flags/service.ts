@@ -1,6 +1,8 @@
 import type { Rule } from "@flagforge/core";
 import type { Prisma, PrismaClient } from "../../generated/prisma/client.js";
 import { writeAudit } from "../audit.js";
+import type { EventBus } from "../realtime/bus.js";
+import { announce, bumpEnvironments } from "../realtime/versions.js";
 import { AppError } from "../errors.js";
 import type { CreateFlagInput, UpdateFlagInput } from "./schemas.js";
 import { normalizeRules, parseStoredRules, presentRule, toBps, toPercentage, type SetFlagStateInput } from "./targeting.js";
@@ -52,7 +54,7 @@ function present(flag: FlagRow, environments: EnvRow[]) {
 }
 
 /** All queries are filtered by workspaceId; a change and its audit entry share one transaction. */
-export function createFlagService(prisma: PrismaClient) {
+export function createFlagService(prisma: PrismaClient, bus: EventBus) {
   async function requireProject(workspaceId: string, projectId: string) {
     const project = await prisma.project.findFirst({ where: { id: projectId, workspaceId }, select: { id: true } });
     if (!project) throw projectNotFound();
@@ -79,7 +81,7 @@ export function createFlagService(prisma: PrismaClient) {
     async createFlag(workspaceId: string, projectId: string, actorId: string, input: CreateFlagInput) {
       await requireProject(workspaceId, projectId);
       try {
-        const flag = await prisma.$transaction(async (tx) => {
+        const { flag, bumps } = await prisma.$transaction(async (tx) => {
           const created = await tx.flag.create({
             data: { workspaceId, projectId, key: input.key, name: input.name, description: input.description ?? null },
           });
@@ -91,8 +93,10 @@ export function createFlagService(prisma: PrismaClient) {
             entityId: created.id,
             metadata: { key: created.key, projectId },
           });
-          return created;
+          // A new flag shows up (off) in every environment of the project, so all their versions move.
+          return { flag: created, bumps: await bumpEnvironments(tx, { workspaceId, projectId }) };
         });
+        await announce(bus, bumps);
         return loadFlag(workspaceId, projectId, flag.id);
       } catch (err) {
         if ((err as { code?: string }).code === "P2002") {
@@ -138,7 +142,7 @@ export function createFlagService(prisma: PrismaClient) {
     },
 
     async deleteFlag(workspaceId: string, projectId: string, flagId: string, actorId: string) {
-      await prisma.$transaction(async (tx) => {
+      const bumps = await prisma.$transaction(async (tx) => {
         const existing = await tx.flag.findFirst({ where: { id: flagId, projectId, workspaceId } });
         if (!existing) throw flagNotFound();
         await tx.flag.delete({ where: { id: flagId } });
@@ -150,7 +154,9 @@ export function createFlagService(prisma: PrismaClient) {
           entityId: flagId,
           metadata: { key: existing.key, projectId },
         });
+        return bumpEnvironments(tx, { workspaceId, projectId });
       });
+      await announce(bus, bumps);
     },
 
     /**
@@ -166,7 +172,7 @@ export function createFlagService(prisma: PrismaClient) {
       actorId: string,
       patch: SetFlagStateInput,
     ) {
-      await prisma.$transaction(async (tx) => {
+      const bumps = await prisma.$transaction(async (tx) => {
         const flag = await tx.flag.findFirst({ where: { id: flagId, projectId, workspaceId } });
         if (!flag) throw flagNotFound();
         const environment = await tx.environment.findFirst({ where: { id: environmentId, projectId, workspaceId } });
@@ -198,6 +204,8 @@ export function createFlagService(prisma: PrismaClient) {
         });
 
         const where = { key: flag.key, environmentId, environmentKey: environment.key };
+        const targetingChanged =
+          before.fallthroughBps !== after.fallthroughBps || JSON.stringify(before.rules) !== JSON.stringify(after.rules);
         if (before.enabled !== after.enabled) {
           await writeAudit(tx, {
             workspaceId,
@@ -208,8 +216,6 @@ export function createFlagService(prisma: PrismaClient) {
             metadata: { ...where, from: before.enabled, to: after.enabled },
           });
         }
-        const targetingChanged =
-          before.fallthroughBps !== after.fallthroughBps || JSON.stringify(before.rules) !== JSON.stringify(after.rules);
         if (targetingChanged) {
           await writeAudit(tx, {
             workspaceId,
@@ -224,7 +230,11 @@ export function createFlagService(prisma: PrismaClient) {
             } as unknown as Prisma.InputJsonValue,
           });
         }
+        // Only a real change moves the version, so a no-op save does not wake every connected SDK.
+        const changed = before.enabled !== after.enabled || targetingChanged;
+        return changed ? bumpEnvironments(tx, { workspaceId, environmentId }) : [];
       });
+      await announce(bus, bumps);
       return loadFlag(workspaceId, projectId, flagId);
     },
 
