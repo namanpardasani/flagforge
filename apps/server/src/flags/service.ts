@@ -1,8 +1,7 @@
 import type { Rule } from "@flagforge/core";
 import type { Prisma, PrismaClient } from "../../generated/prisma/client.js";
 import { writeAudit } from "../audit.js";
-import type { EventBus } from "../realtime/bus.js";
-import { announce, bumpEnvironments } from "../realtime/versions.js";
+import { announce, bumpEnvironments, type ChangeNotifier } from "../realtime/versions.js";
 import { AppError } from "../errors.js";
 import type { CreateFlagInput, UpdateFlagInput } from "./schemas.js";
 import { normalizeRules, parseStoredRules, presentRule, toBps, toPercentage, type SetFlagStateInput } from "./targeting.js";
@@ -54,7 +53,7 @@ function present(flag: FlagRow, environments: EnvRow[]) {
 }
 
 /** All queries are filtered by workspaceId; a change and its audit entry share one transaction. */
-export function createFlagService(prisma: PrismaClient, bus: EventBus) {
+export function createFlagService(prisma: PrismaClient, notifier: ChangeNotifier) {
   async function requireProject(workspaceId: string, projectId: string) {
     const project = await prisma.project.findFirst({ where: { id: projectId, workspaceId }, select: { id: true } });
     if (!project) throw projectNotFound();
@@ -96,7 +95,7 @@ export function createFlagService(prisma: PrismaClient, bus: EventBus) {
           // A new flag shows up (off) in every environment of the project, so all their versions move.
           return { flag: created, bumps: await bumpEnvironments(tx, { workspaceId, projectId }) };
         });
-        await announce(bus, bumps);
+        await announce(notifier, bumps);
         return loadFlag(workspaceId, projectId, flag.id);
       } catch (err) {
         if ((err as { code?: string }).code === "P2002") {
@@ -156,7 +155,7 @@ export function createFlagService(prisma: PrismaClient, bus: EventBus) {
         });
         return bumpEnvironments(tx, { workspaceId, projectId });
       });
-      await announce(bus, bumps);
+      await announce(notifier, bumps);
     },
 
     /**
@@ -234,7 +233,7 @@ export function createFlagService(prisma: PrismaClient, bus: EventBus) {
         const changed = before.enabled !== after.enabled || targetingChanged;
         return changed ? bumpEnvironments(tx, { workspaceId, environmentId }) : [];
       });
-      await announce(bus, bumps);
+      await announce(notifier, bumps);
       return loadFlag(workspaceId, projectId, flagId);
     },
 

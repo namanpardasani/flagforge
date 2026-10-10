@@ -72,6 +72,11 @@ export interface ClientStatus {
   lastSuccessAt?: number;
   consecutiveFailures: number;
   stream: StreamState;
+  /**
+   * True while the server says its own event feed is broken (e.g. it lost its Redis connection):
+   * the stream is open but may be missing changes, so polling runs at the normal rate.
+   */
+  streamDegraded: boolean;
   /** Version of the config currently being served, when the server reports one. */
   version?: number;
   /** True after a 401/403: polling has stopped until you create a new client. */

@@ -353,3 +353,86 @@ describe("event bus", () => {
     expect(seen).toEqual([1]);
   });
 });
+
+describe("degraded notifications (the bus lost contact with other instances)", () => {
+  /** A bus whose health the test controls. */
+  class ControlledBus extends InMemoryEventBus {
+    healthy = true;
+    #handlers = new Set<(healthy: boolean) => void>();
+    override isHealthy() {
+      return this.healthy;
+    }
+    override onHealthChange(handler: (healthy: boolean) => void) {
+      this.#handlers.add(handler);
+      return () => this.#handlers.delete(handler);
+    }
+    setHealth(healthy: boolean) {
+      this.healthy = healthy;
+      for (const h of this.#handlers) h(healthy);
+    }
+  }
+
+  async function harness(version: number) {
+    const bus = new ControlledBus();
+    const fakePrisma = {
+      environment: { findFirst: async () => ({ configVersion: version }) },
+      apiKey: { findFirst: async () => ({ id: "k1" }) },
+    } as unknown as PrismaClient;
+    const manager = new StreamManager(fakePrisma, bus, { heartbeatMs: 60_000, revalidateMs: 60_000, maxConnections: 10, maxPerKey: 10 });
+    const mini = express();
+    mini.get("/s", (req, res) => {
+      req.sdk = { apiKeyId: "k1", workspaceId: "w1", projectId: "p1", environmentId: "e1", environmentKey: "dev" };
+      void manager.handle(req, res).catch(() => res.end());
+    });
+    return { bus, manager, server: await listen(mini) };
+  }
+  const names = (s: OpenStream) => s.events().map((m) => m.event);
+
+  it("tells connected SDKs when the feed breaks, and re-announces the version when it recovers", async () => {
+    const { bus, server } = await harness(7);
+    try {
+      const s = await openStream(`${server.url}/s`);
+      open.push(s);
+      await s.nextEvent();
+      expect(names(s)).toEqual(["hello"]);
+
+      bus.setHealth(false);
+      await until(() => expect(names(s)).toEqual(["hello", "degraded"]));
+      expect(JSON.parse(s.events()[1]!.data!)).toEqual({ degraded: true });
+      expect(s.events()[1]!.id).toBeUndefined(); // not a versioned event
+
+      bus.setHealth(true);
+      await until(() => expect(names(s)).toEqual(["hello", "degraded", "hello"]));
+      expect(s.versions().filter((v) => v !== undefined)).toEqual([7, 7]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("flags a stream that connects while the feed is already broken", async () => {
+    const { bus, server } = await harness(3);
+    try {
+      bus.healthy = false;
+      const s = await openStream(`${server.url}/s`);
+      open.push(s);
+      await until(() => expect(names(s)).toEqual(["hello", "degraded"]));
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("does not announce anything when health does not change, and stops listening after dispose", async () => {
+    const { bus, manager, server } = await harness(1);
+    try {
+      const s = await openStream(`${server.url}/s`);
+      open.push(s);
+      await s.nextEvent();
+      manager.dispose();
+      bus.setHealth(false);
+      await sleep(150);
+      expect(names(s)).toEqual(["hello"]);
+    } finally {
+      await server.stop();
+    }
+  });
+});

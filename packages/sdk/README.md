@@ -24,6 +24,7 @@ if (flags.isEnabled("new-checkout", { key: user.id, attributes: { plan: user.pla
 |---|---|
 | Normal | Config is cached in memory. A real-time stream (SSE) announces changes, so they arrive within moments (about 25ms on a local machine). Polling stays on as a safety net: every 30s normally, every 5 min while the stream is healthy, always with `If-None-Match` (unchanged = tiny 304 response). |
 | Stream drops | Reconnects with exponential backoff and jitter. Every reconnect starts with the server's current version, so changes missed while disconnected are fetched immediately. Meanwhile polling returns to the normal rate. A silent connection (no heartbeat for 60s) is treated as dead and replaced. |
+| Server says the stream is degraded | The server sends a `degraded` event when its own event feed is broken (e.g. it lost Redis). The stream stays open but is no longer trusted: polling returns to the normal rate (`status.streamDegraded`) until the server announces recovery with a fresh version. |
 | Too many streams for one key (429) | The client keeps working through polling and keeps retrying the stream. |
 | Server unreachable at startup | Falls back to the on-disk copy (`storage`), then `bootstrap`, then your default value. Polling keeps retrying and switches to live data when the server returns. |
 | Server goes down later | Keeps serving the last known config (availability over freshness). Retries with exponential backoff and jitter. |

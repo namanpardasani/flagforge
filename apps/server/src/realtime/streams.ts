@@ -14,6 +14,12 @@ export interface StreamOptions {
 
 interface Connection {
   apiKeyId: string;
+  environmentId: string;
+  workspaceId: string;
+  /** Re-announce the current version (used after the bus may have missed events). */
+  hello: (version: number) => void;
+  /** Tell the SDK this instance can no longer hear other instances, so it should poll normally. */
+  degraded: () => void;
   close: () => void;
 }
 
@@ -27,13 +33,45 @@ interface Connection {
  */
 export class StreamManager {
   readonly #connections = new Map<string, Set<Connection>>();
+  readonly #offHealth: () => void;
   #total = 0;
 
   constructor(
     private readonly prisma: PrismaClient,
     private readonly bus: EventBus,
     private readonly options: StreamOptions,
-  ) {}
+  ) {
+    // While this instance cannot hear other instances (Redis connection down), tell SDKs so they stop
+    // relying on the stream and poll at the normal rate. When it is back, events may have been missed
+    // in the gap, so re-announce the current version: SDKs compare it with theirs and refetch only if
+    // they really missed something. (The hello also clears their "degraded" flag.)
+    this.#offHealth = bus.onHealthChange((healthy) => {
+      if (healthy) void this.#resync();
+      else for (const set of this.#connections.values()) for (const c of set) c.degraded();
+    });
+  }
+
+  async #resync() {
+    const byEnvironment = new Map<string, { workspaceId: string; connections: Connection[] }>();
+    for (const set of this.#connections.values()) {
+      for (const c of set) {
+        const entry = byEnvironment.get(c.environmentId) ?? { workspaceId: c.workspaceId, connections: [] };
+        entry.connections.push(c);
+        byEnvironment.set(c.environmentId, entry);
+      }
+    }
+    for (const [environmentId, { workspaceId, connections }] of byEnvironment) {
+      try {
+        const env = await this.prisma.environment.findFirst({
+          where: { id: environmentId, workspaceId },
+          select: { configVersion: true },
+        });
+        if (env) for (const c of connections) c.hello(env.configVersion);
+      } catch {
+        // database blip: the next heartbeat/poll will catch these clients up
+      }
+    }
+  }
 
   get connectionCount() {
     return this.#total;
@@ -59,7 +97,16 @@ export class StreamManager {
       const unsubscribes: Array<() => void> = [];
       let done = false;
 
-      const connection: Connection = { apiKeyId: sdk.apiKeyId, close: () => finish() };
+      let resyncHello: (version: number) => void = () => {};
+      let notifyDegraded: () => void = () => {};
+      const connection: Connection = {
+        apiKeyId: sdk.apiKeyId,
+        environmentId: sdk.environmentId,
+        workspaceId: sdk.workspaceId,
+        hello: (version) => resyncHello(version),
+        degraded: () => notifyDegraded(),
+        close: () => finish(),
+      };
       let set = this.#connections.get(sdk.apiKeyId);
       if (!set) this.#connections.set(sdk.apiKeyId, (set = new Set()));
       set.add(connection);
@@ -93,6 +140,12 @@ export class StreamManager {
       // Subscribe BEFORE reading the current version, and queue anything that arrives meanwhile.
       // Otherwise a change committed between "read version" and "subscribe" would be lost.
       let helloSent = false;
+      resyncHello = (version) => {
+        if (helloSent) sendVersion("hello", version);
+      };
+      notifyDegraded = () => {
+        if (helloSent) write(`event: degraded\ndata: {"degraded":true}\n\n`);
+      };
       const queued: number[] = [];
       unsubscribes.push(
         this.bus.subscribe(envTopic(sdk.environmentId), (m: BusMessage) => {
@@ -114,6 +167,7 @@ export class StreamManager {
           if (!env) return finish();
           sendVersion("hello", env.configVersion);
           helloSent = true;
+          if (!this.bus.isHealthy()) notifyDegraded(); // connected while the event feed is already broken
           for (const version of queued.sort((a, b) => a - b)) {
             if (version > env.configVersion) sendVersion("change", version);
           }
@@ -150,5 +204,10 @@ export class StreamManager {
   /** Ends every stream (used on shutdown so server.close() is not held open forever by SSE). */
   closeAll(): void {
     for (const set of [...this.#connections.values()]) for (const c of [...set]) c.close();
+  }
+
+  /** Stops listening to the bus. Call once, when the manager is being discarded. */
+  dispose(): void {
+    this.#offHealth();
   }
 }

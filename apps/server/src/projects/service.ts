@@ -1,5 +1,6 @@
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { AppError } from "../errors.js";
+import type { KeyCache } from "../redis/key-cache.js";
 import type { CreateEnvironmentInput, CreateProjectInput } from "./schemas.js";
 
 const DEFAULT_ENVIRONMENTS = [
@@ -16,7 +17,7 @@ const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === 
  * Every query here is filtered by workspaceId. That is what keeps tenants apart, because
  * the database itself would accept an Environment whose project lives in another workspace.
  */
-export function createProjectService(prisma: PrismaClient) {
+export function createProjectService(prisma: PrismaClient, keyCache: KeyCache) {
   /** Returns the project only if it belongs to this workspace; otherwise it "does not exist". */
   async function requireProject(workspaceId: string, projectId: string) {
     const project = await prisma.project.findFirst({
@@ -68,8 +69,14 @@ export function createProjectService(prisma: PrismaClient) {
     },
 
     async deleteProject(workspaceId: string, projectId: string) {
+      // The keys disappear with the project (cascade). Collect their hashes first so the key cache can forget them.
+      const keys = await prisma.apiKey.findMany({
+        where: { workspaceId, environment: { projectId } },
+        select: { keyHash: true },
+      });
       const { count } = await prisma.project.deleteMany({ where: { id: projectId, workspaceId } });
       if (count === 0) throw projectNotFound();
+      await keyCache.invalidate(keys.map((k) => k.keyHash));
     },
 
     async createEnvironment(workspaceId: string, projectId: string, input: CreateEnvironmentInput) {
@@ -98,10 +105,15 @@ export function createProjectService(prisma: PrismaClient) {
     },
 
     async deleteEnvironment(workspaceId: string, projectId: string, environmentId: string) {
+      const keys = await prisma.apiKey.findMany({
+        where: { workspaceId, environmentId, environment: { projectId } },
+        select: { keyHash: true },
+      });
       const { count } = await prisma.environment.deleteMany({
         where: { id: environmentId, projectId, workspaceId },
       });
       if (count === 0) throw new AppError(404, "ENVIRONMENT_NOT_FOUND", "Environment not found");
+      await keyCache.invalidate(keys.map((k) => k.keyHash));
     },
   };
 }

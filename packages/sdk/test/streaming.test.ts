@@ -315,3 +315,52 @@ describe("polling as a safety net", () => {
     await until(() => expect(on(client)).toBe(false));
   });
 });
+
+describe("degraded stream (the server lost its own event feed)", () => {
+  const degrade = () => stub.sendRaw('event: degraded\ndata: {"degraded":true}\n\n');
+  const recover = (version: number) => stub.sendRaw(`event: hello\nid: ${version}\ndata: {"version":${version}}\n\n`);
+
+  it("goes back to normal-rate polling while degraded, and trusts the stream again after the next hello", async () => {
+    const client = make({ pollIntervalMs: 25, streamPollIntervalMs: 5000 });
+    await client.init();
+    await connected(client);
+    await wait(80);
+    const slow = stub.flagRequests.length;
+    await wait(250);
+    expect(stub.flagRequests.length).toBe(slow); // healthy stream: polling is nearly off
+
+    degrade();
+    await until(() => expect(client.status.streamDegraded).toBe(true));
+    serve(2, checkout(false)); // a change that no event announces
+    await until(() => expect(on(client)).toBe(false)); // found by normal polling
+    expect(client.status.stream).toBe("connected"); // still connected, just not trusted
+
+    recover(2);
+    await until(() => expect(client.status.streamDegraded).toBe(false));
+    await wait(80);
+    const settled = stub.flagRequests.length;
+    await wait(250);
+    expect(stub.flagRequests.length).toBe(settled); // slow safety-net polling again
+  });
+
+  it("a fresh connection starts trusted (the server will say again if it is still degraded)", async () => {
+    const client = make({ pollIntervalMs: 25, streamPollIntervalMs: 5000 });
+    await client.init();
+    await connected(client);
+    degrade();
+    await until(() => expect(client.status.streamDegraded).toBe(true));
+    stub.dropStreams();
+    await until(() => expect(client.status.streamDegraded).toBe(false));
+    await connected(client);
+  });
+
+  it("a hello that is not preceded by a degraded event changes nothing", async () => {
+    const client = make();
+    await client.init();
+    await connected(client);
+    recover(1);
+    await wait(100);
+    expect(client.status.streamDegraded).toBe(false);
+    expect(stub.flagRequests).toHaveLength(1);
+  });
+});

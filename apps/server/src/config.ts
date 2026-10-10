@@ -15,6 +15,17 @@ const envSchema = z.object({
   SSE_REVALIDATE_MS: z.coerce.number().int().min(100).default(60_000),
   SSE_MAX_CONNECTIONS: z.coerce.number().int().min(1).default(2000),
   SSE_MAX_CONNECTIONS_PER_KEY: z.coerce.number().int().min(1).default(50),
+  // Redis is optional: without it the server still works (no cache, per-instance rate limits and events).
+  REDIS_URL: z
+    .string()
+    .regex(/^rediss?:\/\//, "REDIS_URL must start with redis:// or rediss://")
+    .optional(),
+  // How many reverse proxies sit in front (Render, nginx...). Needed so rate limits see the real client IP.
+  TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
+  RATE_LIMIT_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 });
 
 export type Config = z.infer<typeof envSchema>;

@@ -6,45 +6,79 @@ import type { PrismaClient } from "../generated/prisma/client.js";
 import { createApiKeyService } from "./apikeys/service.js";
 import { createAuthService } from "./auth/service.js";
 import type { Config } from "./config.js";
-import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
-import { requestLogger } from "./middleware/request-logger.js";
 import { createFlagService } from "./flags/service.js";
-import { createRealtime, type Realtime } from "./realtime/index.js";
+import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
+import { clientIp, fingerprint, rateLimit } from "./middleware/rate-limit.js";
+import { requestLogger } from "./middleware/request-logger.js";
 import { createProjectService } from "./projects/service.js";
+import { defaultLimits, type RateLimits } from "./rate-limits.js";
+import { createRealtime, type Realtime } from "./realtime/index.js";
+import { createRedisServices, type RedisServices } from "./redis/index.js";
 import { apiKeysRouter } from "./routes/api-keys.js";
 import { authRouter } from "./routes/auth.js";
 import { flagsRouter } from "./routes/flags.js";
+import { healthRouter, type DatabaseCheck } from "./routes/health.js";
 import { projectsRouter } from "./routes/projects.js";
 import { sdkRouter } from "./routes/sdk.js";
 import { workspacesRouter } from "./routes/workspaces.js";
 import { createWorkspaceService } from "./workspaces/service.js";
-import { healthRouter, type DatabaseCheck } from "./routes/health.js";
 
 export interface AppDeps {
   logger: Logger;
   config: Config;
   prisma: PrismaClient;
   checkDatabase: DatabaseCheck;
+  /** Cache, rate limiter and event bus. Without it the app runs fully in-memory (no Redis needed). */
+  redis?: RedisServices;
   /** Event bus + SSE streams. Created automatically when omitted; pass one to control shutdown. */
   realtime?: Realtime;
+  /** Override rate limits (tests use this). */
+  limits?: Partial<RateLimits>;
 }
 
 /** Builds the Express app without listening on a port, so tests can import it. */
-export function createApp({ logger, config, prisma, checkDatabase, realtime = createRealtime(prisma, config) }: AppDeps) {
+export function createApp({ logger, config, prisma, checkDatabase, redis, realtime, limits: limitOverrides }: AppDeps) {
+  const services = redis ?? createRedisServices({ REDIS_URL: undefined, RATE_LIMIT_ENABLED: config.RATE_LIMIT_ENABLED });
+  const rt = realtime ?? createRealtime(prisma, config, services.bus);
+  const limits: RateLimits = { ...defaultLimits, ...limitOverrides };
+
   const app = express();
+  // Behind a reverse proxy every request seems to come from the proxy's IP unless Express is told how
+  // many proxies to trust. Without this, rate limits would treat all users as one.
+  app.set("trust proxy", config.TRUST_PROXY);
+  // Never advertise the framework.
+  app.disable("x-powered-by");
 
   app.use(requestLogger(logger));
   app.use(helmet());
   app.use(cors());
+
+  // Per-IP limit for the management API. /sdk has its own per-key limits (a whole fleet can share one
+  // IP), and /health must always answer for load balancers.
+  const globalLimit = rateLimit(services.rateLimiter, {
+    name: "global",
+    rule: limits.global,
+    key: (req) => fingerprint(clientIp(req)),
+  });
+  app.use((req, res, next) => (req.path === "/health" || req.path.startsWith("/sdk/") ? next() : globalLimit(req, res, next)));
+
   app.use(express.json({ limit: "100kb" }));
 
-  app.use(healthRouter(checkDatabase));
-  app.use(authRouter(createAuthService(prisma, config), config));
+  app.use(healthRouter(checkDatabase, () => services.status()));
+  app.use(authRouter(createAuthService(prisma, config), config, services.rateLimiter, limits));
   app.use(workspacesRouter(createWorkspaceService(prisma), prisma, config));
-  app.use(projectsRouter(createProjectService(prisma), prisma, config));
-  app.use(flagsRouter(createFlagService(prisma, realtime.bus), prisma, config));
-  app.use(apiKeysRouter(createApiKeyService(prisma, realtime.bus), prisma, config));
-  app.use(sdkRouter(prisma, realtime.streams));
+  app.use(projectsRouter(createProjectService(prisma, services.keyCache), prisma, config));
+  app.use(flagsRouter(createFlagService(prisma, { bus: rt.bus, cache: services.configCache }), prisma, config));
+  app.use(apiKeysRouter(createApiKeyService(prisma, rt.bus, services.keyCache), prisma, config));
+  app.use(
+    sdkRouter(prisma, {
+      streams: rt.streams,
+      keyCache: services.keyCache,
+      configCache: services.configCache,
+      limiter: services.rateLimiter,
+      limits,
+    }),
+  );
 
   // Order matters: 404 first, then the error handler must be last.
   app.use(notFoundHandler);

@@ -1,5 +1,12 @@
 import type { Prisma } from "../../generated/prisma/client.js";
+import type { ConfigCache } from "../redis/config-cache.js";
 import { envTopic, publishQuietly, type EventBus } from "./bus.js";
+
+/** What a service needs to tell the rest of the system "this environment changed". */
+export interface ChangeNotifier {
+  bus: EventBus;
+  cache: ConfigCache;
+}
 
 export interface VersionBump {
   environmentId: string;
@@ -28,11 +35,20 @@ export async function bumpEnvironments(tx: Prisma.TransactionClient, scope: Scop
   return rows.map((r) => ({ environmentId: r.id, version: r.configVersion }));
 }
 
-/** Call AFTER the transaction commits, so a listener that refetches immediately sees the new data. */
-export async function announce(bus: EventBus, bumps: VersionBump[]): Promise<void> {
+/**
+ * Call AFTER the transaction commits. Order matters: first move the cache marker (so nothing
+ * older than this version is served from cache anymore), THEN publish. An SDK that reacts to the
+ * event and refetches immediately therefore can never be handed the stale cached copy.
+ */
+export async function announce({ bus, cache }: ChangeNotifier, bumps: VersionBump[]): Promise<void> {
   await Promise.all(
-    bumps.map((b) =>
-      publishQuietly(bus, envTopic(b.environmentId), { type: "config", environmentId: b.environmentId, version: b.version }),
-    ),
+    bumps.map(async (b) => {
+      await cache.markVersion(b.environmentId, b.version);
+      await publishQuietly(bus, envTopic(b.environmentId), {
+        type: "config",
+        environmentId: b.environmentId,
+        version: b.version,
+      });
+    }),
   );
 }

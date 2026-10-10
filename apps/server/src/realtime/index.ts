@@ -22,6 +22,7 @@ export function createRealtime(prisma: PrismaClient, config: Config, bus: EventB
     streams,
     async close() {
       streams.closeAll();
+      streams.dispose();
       await bus.close();
     },
   };

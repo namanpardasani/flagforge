@@ -13,6 +13,17 @@ export const keyTopic = (apiKeyId: string) => `key:${apiKeyId}`;
 export interface EventBus {
   publish(topic: string, message: BusMessage): Promise<void>;
   subscribe(topic: string, handler: (message: BusMessage) => void): () => void;
+  /**
+   * Called when the bus may have missed messages (e.g. Redis reconnected after an outage).
+   * Listeners should re-check the database instead of trusting what they heard.
+   */
+  onResync(handler: () => void): () => void;
+  /**
+   * False while this instance cannot hear events from other instances (e.g. its Redis connection is
+   * down). Streams use it to tell SDKs to poll normally instead of trusting the stream.
+   */
+  isHealthy(): boolean;
+  onHealthChange(handler: (healthy: boolean) => void): () => void;
   close(): Promise<void>;
 }
 
@@ -37,6 +48,20 @@ export class InMemoryEventBus implements EventBus {
       set.delete(handler);
       if (set.size === 0 && this.#handlers.get(topic) === set) this.#handlers.delete(topic);
     };
+  }
+
+  /** Nothing in this process can be missed, so a resync is never needed. */
+  onResync(_handler: () => void): () => void {
+    return () => {};
+  }
+
+  /** Everything happens inside this process, so the bus cannot be cut off from other publishers. */
+  isHealthy(): boolean {
+    return true;
+  }
+
+  onHealthChange(_handler: (healthy: boolean) => void): () => void {
+    return () => {};
   }
 
   async close(): Promise<void> {

@@ -1,5 +1,6 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { createRedisServices } from "../src/redis/index.js";
 import { makeApp } from "./helpers.js";
 
 describe("GET /health", () => {
@@ -7,7 +8,25 @@ describe("GET /health", () => {
     const app = makeApp();
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: "ok", database: "up" });
+    expect(res.body).toEqual({ status: "ok", database: "up", redis: "up" });
+  });
+
+  it("reports redis as disabled when none is configured, and still answers 200", async () => {
+    const app = makeApp({ redis: createRedisServices({ REDIS_URL: undefined, RATE_LIMIT_ENABLED: true }) });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "ok", database: "up", redis: "disabled" });
+  });
+
+  it("stays 200 but reports degraded when Redis is down (Redis is an optimisation, Postgres is required)", async () => {
+    const dead = createRedisServices({ REDIS_URL: "redis://127.0.0.1:1", RATE_LIMIT_ENABLED: true });
+    try {
+      const res = await request(makeApp({ redis: dead })).get("/health");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ status: "degraded", database: "up", redis: "down" });
+    } finally {
+      await dead.close();
+    }
   });
 
   it("returns 503 without leaking the reason when the database check fails", async () => {
@@ -18,7 +37,7 @@ describe("GET /health", () => {
     });
     const res = await request(app).get("/health");
     expect(res.status).toBe(503);
-    expect(res.body).toEqual({ status: "degraded", database: "down" });
+    expect(res.body).toEqual({ status: "degraded", database: "down", redis: "up" });
     expect(JSON.stringify(res.body)).not.toContain("password");
   });
 });

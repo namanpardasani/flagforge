@@ -42,6 +42,7 @@ export class FlagForgeClient {
   #initPromise: Promise<{ ready: boolean; source: ConfigSource }> | undefined;
 
   #streamState: StreamState;
+  #streamDegraded = false;
   #streamAbort: AbortController | undefined;
   readonly #sleepers = new Set<() => void>();
   #wantVersion = -1;
@@ -243,7 +244,9 @@ export class FlagForgeClient {
     if (this.#closed || this.#fatal || this.#pollIntervalMs <= 0) return;
     // Healthy: poll on the interval, but only as a rare safety net while the stream is connected.
     // Failing: back off exponentially so we do not hammer a struggling server.
-    const healthy = this.#streamState === "connected" ? Math.max(this.#pollIntervalMs, this.#streamPollIntervalMs) : this.#pollIntervalMs;
+    // A stream the server flagged as degraded cannot be trusted to deliver every change, so it does not earn the slow rate.
+    const streamTrusted = this.#streamState === "connected" && !this.#streamDegraded;
+    const healthy = streamTrusted ? Math.max(this.#pollIntervalMs, this.#streamPollIntervalMs) : this.#pollIntervalMs;
     const base =
       this.#failures === 0
         ? healthy
@@ -259,6 +262,7 @@ export class FlagForgeClient {
   // ---- real-time stream ---------------------------------------------------------------------
 
   #setStream(state: StreamState) {
+    if (state !== "connected") this.#streamDegraded = false; // a fresh connection starts trusted until the server says otherwise
     if (this.#streamState === state) return;
     this.#streamState = state;
     // Stream up -> poll rarely; stream down -> poll at the normal rate until it is back.
@@ -355,7 +359,19 @@ export class FlagForgeClient {
   }
 
   #onStreamMessage(event: string | undefined, data: string | undefined) {
+    if (event === "degraded") {
+      if (!this.#streamDegraded) {
+        this.#streamDegraded = true;
+        this.#schedule(); // go back to polling at the normal rate
+      }
+      return;
+    }
     if (event !== "hello" && event !== "change") return; // unknown events from newer servers are ignored
+    if (event === "hello" && this.#streamDegraded) {
+      // The server announced a fresh version after its feed recovered: the stream can be trusted again.
+      this.#streamDegraded = false;
+      this.#schedule();
+    }
     let version: unknown;
     try {
       version = (JSON.parse(data ?? "") as { version?: unknown }).version;
@@ -427,6 +443,7 @@ export class FlagForgeClient {
       ...(this.#lastSuccessAt !== undefined ? { lastSuccessAt: this.#lastSuccessAt } : {}),
       consecutiveFailures: this.#failures,
       stream: this.#streamState,
+      streamDegraded: this.#streamDegraded,
       ...(this.#version !== undefined ? { version: this.#version } : {}),
       fatal: this.#fatal,
     };

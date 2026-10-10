@@ -3,6 +3,7 @@ import type { PrismaClient } from "../../generated/prisma/client.js";
 import { writeAudit } from "../audit.js";
 import { hashToken } from "../auth/tokens.js";
 import { keyTopic, publishQuietly, type EventBus } from "../realtime/bus.js";
+import type { KeyCache } from "../redis/key-cache.js";
 import { AppError } from "../errors.js";
 
 export const API_KEY_PREFIX = "ff_";
@@ -18,7 +19,7 @@ export function generateApiKey() {
   return { key, keyHash: hashToken(key), prefix: key.slice(0, 10) };
 }
 
-export function createApiKeyService(prisma: PrismaClient, bus: EventBus) {
+export function createApiKeyService(prisma: PrismaClient, bus: EventBus, keyCache: KeyCache) {
   /** The environment must belong to this project AND workspace, otherwise it does not exist. */
   async function requireEnvironment(workspaceId: string, projectId: string, environmentId: string) {
     const environment = await prisma.environment.findFirst({
@@ -62,6 +63,10 @@ export function createApiKeyService(prisma: PrismaClient, bus: EventBus) {
 
     async revoke(workspaceId: string, projectId: string, environmentId: string, actorId: string, apiKeyId: string) {
       const environment = await requireEnvironment(workspaceId, projectId, environmentId);
+      const existing = await prisma.apiKey.findFirst({
+        where: { id: apiKeyId, environmentId, workspaceId },
+        select: { keyHash: true },
+      });
       await prisma.$transaction(async (tx) => {
         // revokedAt: null in the filter makes this atomic and idempotent-safe: a second revoke is a 404.
         const { count } = await tx.apiKey.updateMany({
@@ -78,6 +83,8 @@ export function createApiKeyService(prisma: PrismaClient, bus: EventBus) {
           metadata: { environmentId, environmentKey: environment.key },
         });
       });
+      // Revocation must be immediate: forget the key everywhere BEFORE anything else can use the cached copy.
+      if (existing) await keyCache.invalidate([existing.keyHash]);
       // Close any open streams that were using this key right away (after the revoke is committed).
       await publishQuietly(bus, keyTopic(apiKeyId), { type: "key_revoked", apiKeyId });
     },
