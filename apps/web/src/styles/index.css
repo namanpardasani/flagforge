@@ -44,6 +44,20 @@
   --animate-sweep: sweep 1.6s linear infinite;
   --animate-scan: scan 3.2s linear infinite;
 
+  --animate-blink: blink 1.06s steps(1, end) infinite;
+  --animate-marquee: marquee 70s linear infinite;
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+  /* The track holds the list twice; sliding it by half its width loops without a jump. */
+  @keyframes marquee {
+    to {
+      transform: translateX(-50%);
+    }
+  }
   @keyframes sweep {
     from {
       transform: translateX(-100%);
@@ -153,6 +167,12 @@
   background-size: 72px 72px;
   mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 30%, transparent 78%);
   opacity: 0.55;
+}
+
+/* Landing page only: the crosshair replaces the system cursor (see landing/Cursor.tsx). */
+.custom-cursor,
+.custom-cursor * {
+  cursor: none !important;
 }
 
 /* Looping decoration stops when its container is offscreen or the tab is hidden (see motion/useOffscreenPause). */

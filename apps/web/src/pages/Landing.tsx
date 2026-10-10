@@ -1,145 +1,115 @@
 import "lenis/dist/lenis.css";
 import { ReactLenis } from "lenis/react";
 import { ArrowRight } from "lucide-react";
-import type { ReactNode } from "react";
+import { useReducedMotion } from "motion/react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { FigCaption, Grain, GridLines } from "@/components/blueprint/marks";
+import { Grain, GridLines } from "@/components/blueprint/marks";
 import { Mark } from "@/components/shell/Sidebar";
 import { DEFAULT_SCOPE, paths } from "@/components/shell/use-scope";
-import { Reveal, RevealGroup, RevealItem } from "@/motion";
+import { cn } from "@/lib/cn";
+import { Boot } from "@/landing/Boot";
+import { shouldBoot } from "@/landing/boot-session";
+import { Cursor } from "@/landing/Cursor";
+import { Hero } from "@/landing/Hero";
+import { useFinePointer, useNear } from "@/landing/hooks";
+import { Magnetic } from "@/landing/Magnetic";
+
+// Everything below the hero is a separate file that is downloaded only when you scroll near it.
+// The first screen therefore loads the hero and nothing else.
+const Flip = lazy(() => import("@/landing/sections/Flip"));
+const Blueprint = lazy(() => import("@/landing/sections/Blueprint"));
+const Bento = lazy(() => import("@/landing/sections/Bento"));
+const Sdk = lazy(() => import("@/landing/sections/Sdk"));
+const Marquee = lazy(() => import("@/landing/sections/Marquee"));
+const Footer = lazy(() => import("@/landing/sections/Footer"));
+
+const NAV = [
+  { href: "#flip", label: "How it lands" },
+  { href: "#blueprint", label: "Architecture" },
+  { href: "#sdk", label: "SDK" },
+] as const;
 
 /**
- * Landing PREVIEW. The real marketing page is a later prompt; this exists so the marketing-only
- * pieces can be reviewed now: smooth scrolling (Lenis), the drafting grid, the two-tone headline.
+ * The landing page: one long scroll, every demo simulated in the browser (no backend calls).
  *
- * Lenis is imported here and nowhere else, and this page is lazy-loaded, so the dashboard never
- * downloads or runs it. A dashboard should scroll exactly like the operating system does.
- * Lenis turns itself off when the visitor prefers reduced motion.
+ * Lenis (smooth scrolling) is imported here and nowhere else, and this page is itself lazy-loaded,
+ * so the dashboard never downloads or runs it. Lenis leaves touch scrolling native and turns
+ * itself off when the visitor prefers reduced motion.
  */
 export default function LandingPage() {
   const dashboard = paths.project(DEFAULT_SCOPE.workspaceSlug, DEFAULT_SCOPE.projectKey);
+  const reduced = useReducedMotion() ?? false;
+  const fine = useFinePointer();
+  // Decided once, on the first render: the intro must not appear halfway through a visit.
+  const [booting, setBooting] = useState(() => shouldBoot() && !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const [ready, setReady] = useState(!booting);
 
   return (
     <ReactLenis root options={{ lerp: 0.12, anchors: true }}>
       <div className="relative min-h-dvh bg-canvas">
-        <GridLines className="h-[900px]" />
+        <GridLines className="h-[980px]" />
 
-        <header className="relative mx-auto flex h-16 max-w-6xl items-center justify-between border-b border-hairline px-6">
+        <header className="relative mx-auto flex h-16 max-w-6xl items-center justify-between border-b border-hairline px-4 md:px-6">
           <span className="flex items-center gap-2.5 text-sm font-medium text-ink">
             <Mark /> FlagForge
           </span>
-          <Link to={dashboard} className="flex h-8 items-center gap-2 rounded-sm bg-ink px-3 text-sm font-medium text-canvas hover:bg-ink/90">
-            Open dashboard <ArrowRight className="size-4" strokeWidth={1.5} />
-          </Link>
+          <nav aria-label="Sections" className="caption hidden gap-8 text-muted md:flex">
+            {NAV.map((item) => (
+              <a key={item.href} href={item.href} className="hover:text-ink">
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          <Magnetic>
+            <Link to={dashboard} className="flex h-8 items-center gap-2 rounded-sm border border-line-strong px-3 text-sm font-medium text-ink hover:bg-raised">
+              Open dashboard <ArrowRight className="size-4" strokeWidth={1.5} />
+            </Link>
+          </Magnetic>
         </header>
 
-        <main className="relative mx-auto max-w-6xl px-6">
-          <RevealGroup step={0.08} className="pb-24 pt-20">
-            <RevealItem>
-              <FigCaption index="0.0" label="Feature flags and rollouts" />
-            </RevealItem>
-            <RevealItem>
-              <h1 className="mt-6 max-w-4xl text-balance text-5xl font-medium leading-[1.05] tracking-tight text-ink md:text-6xl">
-                Ship the change. Keep the <span className="accent text-[1.08em]">switch</span>.{" "}
-                <span className="text-muted">Put a release behind a flag, roll it out by percentage, and turn it off in one click if it misbehaves.</span>
-              </h1>
-            </RevealItem>
-          </RevealGroup>
+        <main className="relative">
+          <Hero ready={ready} dashboardPath={dashboard} />
 
-          <section aria-label="How it works" className="grid border-y border-hairline md:grid-cols-3 md:divide-x md:divide-hairline">
-            <Figure index="0.1" title="Decided inside your app" drawing={<Layers />}>
-              The SDK downloads the rules once and evaluates every flag in process. A flag check costs no network call.
-            </Figure>
-            <Figure index="0.2" title="Changes arrive as they happen" drawing={<Nodes />}>
-              The server streams a signal when a flag changes and each SDK fetches the new rules. If the stream drops, polling takes over.
-            </Figure>
-            <Figure index="0.3" title="Every change is on record" drawing={<Ledger />}>
-              Who changed which flag, in which environment, and what it was before. Written in the same transaction as the change.
-            </Figure>
-          </section>
-
-          <section aria-labelledby="path-title" className="py-28">
-            <FigCaption id="path-title" index="0.4" label="The path of one change" />
-            <ol className="mt-8 max-w-2xl">
-              {STEPS.map((step, i) => (
-                <Reveal key={step.title} whenInView className="grid grid-cols-[3rem_1fr] border-b border-hairline py-6 first:border-t">
-                  <span className="font-mono text-xs text-faint">{String(i + 1).padStart(2, "0")}</span>
-                  <div>
-                    <h3 className="text-base font-medium text-ink">{step.title}</h3>
-                    <p className="mt-1.5 text-sm leading-relaxed text-muted">{step.body}</p>
-                  </div>
-                </Reveal>
-              ))}
-            </ol>
-          </section>
+          <LazySection id="flip" placeholder="min-h-[900px] lg:min-h-[760px]">
+            <Flip />
+          </LazySection>
+          <LazySection id="blueprint" placeholder="min-h-[900px] md:min-h-[300vh]">
+            <Blueprint />
+          </LazySection>
+          <LazySection id="bento" placeholder="min-h-[1100px] md:min-h-[860px]">
+            <Bento />
+          </LazySection>
+          <LazySection id="sdk" placeholder="min-h-[820px] lg:min-h-[620px]">
+            <Sdk />
+          </LazySection>
+          <LazySection placeholder="min-h-[62px]">
+            <Marquee />
+          </LazySection>
         </main>
 
-        <footer className="relative mx-auto flex max-w-6xl items-center justify-between border-t border-hairline px-6 py-6">
-          <p className="caption text-faint">FlagForge / landing preview</p>
-          <Link to={paths.kit} className="caption text-muted hover:text-ink">
-            UI kit
-          </Link>
-        </footer>
+        <LazySection placeholder="min-h-[640px]">
+          <Footer dashboardPath={dashboard} />
+        </LazySection>
+
         <Grain />
+        {fine && !reduced && <Cursor />}
+        {booting && <Boot onReveal={() => setReady(true)} onGone={() => setBooting(false)} />}
       </div>
     </ReactLenis>
   );
 }
 
-const STEPS = [
-  { title: "Someone flips a flag", body: "In the dashboard, for one environment. The change and its audit entry are saved together or not at all." },
-  { title: "The environment gets a new version number", body: "Each environment counts its own changes, so an SDK can tell at a glance whether it has missed anything." },
-  { title: "Connected SDKs are told", body: "A small message goes down an open stream: this environment is now at version 42. Nothing else is sent." },
-  { title: "Each SDK fetches and swaps", body: "It downloads the rules for that version and replaces its copy in one step. The next flag check uses them." },
-] as const;
-
-function Figure({ index, title, drawing, children }: { index: string; title: string; drawing: ReactNode; children: ReactNode }) {
+/**
+ * Holds a section's place with an empty box of about the right height until the visitor scrolls
+ * near it, then loads and shows the real thing. The swap happens well below the screen edge, so
+ * nothing the visitor is looking at moves.
+ */
+function LazySection({ id, placeholder, children }: { id?: string; placeholder: string; children: ReactNode }) {
+  const [ref, near] = useNear<HTMLDivElement>("700px");
   return (
-    <Reveal whenInView className="px-6 py-8 max-md:border-b max-md:border-hairline max-md:last:border-b-0 md:first:pl-0 md:last:pr-0">
-      <FigCaption index={index} />
-      <div className="my-8 h-28 text-line-strong">{drawing}</div>
-      <h2 className="text-base font-medium text-ink">{title}</h2>
-      <p className="mt-2 text-sm leading-relaxed text-muted">{children}</p>
-    </Reveal>
-  );
-}
-
-// Thin-line drawings. One stroke weight, no fills, so they read as diagrams rather than icons.
-const stroke = { stroke: "currentColor", strokeWidth: 1, fill: "none" } as const;
-
-function Layers() {
-  return (
-    <svg viewBox="0 0 160 112" aria-hidden className="h-full">
-      {[0, 1, 2].map((i) => (
-        <path key={i} d={`M80 ${18 + i * 22} l56 20 -56 20 -56 -20z`} {...stroke} className={i === 0 ? "text-ink" : undefined} />
-      ))}
-    </svg>
-  );
-}
-
-function Nodes() {
-  return (
-    <svg viewBox="0 0 160 112" aria-hidden className="h-full">
-      <path d="M36 56h36M88 56l36 -28M88 56h36M88 56l36 28" {...stroke} />
-      <rect x="20" y="48" width="16" height="16" {...stroke} className="text-ink" />
-      <rect x="72" y="48" width="16" height="16" {...stroke} />
-      {[20, 48, 76].map((y) => (
-        <rect key={y} x="124" y={y} width="16" height="16" {...stroke} />
-      ))}
-    </svg>
-  );
-}
-
-function Ledger() {
-  return (
-    <svg viewBox="0 0 160 112" aria-hidden className="h-full">
-      <rect x="28" y="14" width="104" height="84" {...stroke} />
-      {[34, 54, 74].map((y, i) => (
-        <g key={y}>
-          <path d={`M40 ${y}h8`} {...stroke} className="text-ink" />
-          <path d={`M56 ${y}h${[58, 44, 52][i]}`} {...stroke} />
-        </g>
-      ))}
-    </svg>
+    <div ref={ref} id={id} className={cn("scroll-mt-8", !near && placeholder)}>
+      {near && <Suspense fallback={<div className={placeholder} />}>{children}</Suspense>}
+    </div>
   );
 }

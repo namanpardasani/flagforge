@@ -12,14 +12,14 @@ const toggleIn = (key: string) => within(rowFor(key)).getByRole("switch", hidden
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Opens the dev panel and pretends a teammate changed the next flag. */
-async function simulateRemoteUpdate(user: ReturnType<typeof renderApp>["user"]) {
+async function simulateRemoteUpdate(user: Awaited<ReturnType<typeof renderApp>>["user"]) {
   if (!screen.queryByRole("button", { name: "Simulate remote update" })) await user.click(screen.getByRole("button", { name: "Dev" }));
   await user.click(screen.getByRole("button", { name: "Simulate remote update" }));
 }
 
 describe("flag list", () => {
   it("shows every flag with its state in the chosen environment", async () => {
-    renderApp(FLAGS_URL);
+    await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     expect(rows()).toHaveLength(6);
     expect(toggleIn("route-optimizer-v2")).toBeChecked();
@@ -29,7 +29,7 @@ describe("flag list", () => {
   });
 
   it("searches by key, name or description, and says when nothing matches", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     const search = await screen.findByRole("searchbox", { name: "Search flags" });
     await user.type(search, "labels");
     await waitFor(() => expect(rows()).toHaveLength(1));
@@ -40,7 +40,7 @@ describe("flag list", () => {
   });
 
   it("sorts by key and by state", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     const keys = () => rows().map((row) => within(row).getAllByRole("link")[0]!.textContent);
     expect(keys()[0]).toBe("route-optimizer-v2"); // most recently updated first
@@ -54,14 +54,14 @@ describe("flag list", () => {
   });
 
   it("opens a flag from its key", async () => {
-    const { user, router } = renderApp(FLAGS_URL);
+    const { user, router } = await renderApp(FLAGS_URL);
     await user.click(await screen.findByRole("link", { name: "instant-payouts" }));
     expect(router.state.location.pathname).toBe(flagUrl("instant-payouts"));
     expect(await screen.findByRole("heading", { level: 1, name: "instant-payouts" })).toBeInTheDocument();
   });
 
   it("copies a key from the quick actions", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(within(rowFor("eta-dark-launch")).getByRole("button", { name: "Copy key eta-dark-launch" }));
     expect(await navigator.clipboard.readText()).toBe("eta-dark-launch");
@@ -71,7 +71,7 @@ describe("flag list", () => {
 
 describe("toggling outside Production", () => {
   it("applies at once, updates the counts and confirms with a toast", async () => {
-    const { user } = renderApp(FLAGS_URL, { env: "staging" });
+    const { user } = await renderApp(FLAGS_URL, { env: "staging" });
     await screen.findByRole("list", { name: "Flags" });
     expect(screen.getByRole("tab", { name: /On/ })).toHaveTextContent("04");
 
@@ -83,7 +83,7 @@ describe("toggling outside Production", () => {
   });
 
   it("plays the ember bloom only when turning ON", async () => {
-    const { user } = renderApp(FLAGS_URL, { env: "staging" });
+    const { user } = await renderApp(FLAGS_URL, { env: "staging" });
     await screen.findByRole("list", { name: "Flags" });
     expect(document.querySelector("[data-bloom]")).toBeNull(); // not on first render, even for flags already on
 
@@ -95,7 +95,7 @@ describe("toggling outside Production", () => {
   });
 
   it("can be flipped from the keyboard", async () => {
-    const { user } = renderApp(FLAGS_URL, { env: "dev" });
+    const { user } = await renderApp(FLAGS_URL, { env: "dev" });
     await screen.findByRole("list", { name: "Flags" });
     toggleIn("strict-address-check").focus();
     await user.keyboard(" ");
@@ -105,7 +105,7 @@ describe("toggling outside Production", () => {
   });
 
   it("puts the switch back and says so when the server refuses (optimistic rollback)", async () => {
-    const { user } = renderApp(FLAGS_URL, { env: "staging" });
+    const { user } = await renderApp(FLAGS_URL, { env: "staging" });
     await screen.findByRole("list", { name: "Flags" });
     await user.click(screen.getByRole("button", { name: "Dev" }));
     await user.click(screen.getByRole("checkbox", { name: /Fail the next save/ }));
@@ -121,7 +121,7 @@ describe("Production kill switch (hold to confirm)", () => {
   const holdButton = () => within(dialog()).getByRole("button", { name: /Hold to turn off|Keep holding/ });
 
   it("asks first: clicking the switch changes nothing by itself", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(toggleIn("route-optimizer-v2"));
     expect(dialog()).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("Production kill switch (hold to confirm)", () => {
   });
 
   it("a plain click on the hold button does nothing", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(toggleIn("route-optimizer-v2"));
     await user.click(holdButton());
@@ -139,7 +139,7 @@ describe("Production kill switch (hold to confirm)", () => {
   });
 
   it("releasing early cancels, and the flag stays on", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(toggleIn("route-optimizer-v2"));
     await user.pointer({ keys: "[MouseLeft>]", target: holdButton() });
@@ -152,7 +152,7 @@ describe("Production kill switch (hold to confirm)", () => {
   });
 
   it("holding for the full 700ms turns it off, flashes the row, shows a toast and closes the dialog", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(toggleIn("route-optimizer-v2"));
 
@@ -168,7 +168,7 @@ describe("Production kill switch (hold to confirm)", () => {
   });
 
   it("works from the keyboard by holding Enter", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(toggleIn("carrier-rate-cache"));
     const button = within(screen.getByRole("dialog")).getByRole("button", { name: /Hold to turn off/ });
@@ -179,7 +179,7 @@ describe("Production kill switch (hold to confirm)", () => {
   });
 
   it("Escape or Cancel leaves everything as it was", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(toggleIn("route-optimizer-v2"));
     await user.keyboard("{Escape}");
@@ -193,7 +193,7 @@ describe("Production kill switch (hold to confirm)", () => {
   });
 
   it("turning a flag ON in Production also needs the hold", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.click(toggleIn("instant-payouts"));
     const confirm = screen.getByRole("dialog", { name: "Turn on instant-payouts in Production?" });
@@ -202,7 +202,7 @@ describe("Production kill switch (hold to confirm)", () => {
   });
 
   it("offers a Kill quick action only for flags that are on, and only in Production", async () => {
-    const prod = renderApp(FLAGS_URL);
+    const prod = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     expect(within(rowFor("route-optimizer-v2")).getByRole("button", { name: "Kill route-optimizer-v2 in Production" })).toBeInTheDocument();
     expect(within(rowFor("instant-payouts")).queryByRole("button", { name: /Kill/ })).toBeNull();
@@ -214,7 +214,7 @@ describe("Production kill switch (hold to confirm)", () => {
 
 describe("live updates", () => {
   it("applies a change made elsewhere, flashes that row ember and tags it", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     expect(within(rowFor("route-optimizer-v2")).getByText("25%")).toBeInTheDocument();
 
@@ -229,7 +229,7 @@ describe("live updates", () => {
   });
 
   it("moves through the flags in turn, so the demo is predictable", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await simulateRemoteUpdate(user); // first flag: rollout 25 -> 35
     await simulateRemoteUpdate(user); // second flag: carrier-rate-cache turned off
@@ -240,7 +240,7 @@ describe("live updates", () => {
 
 describe("flag detail", () => {
   it("shows the flag, its rollout, rules and history", async () => {
-    renderApp(flagUrl("route-optimizer-v2"));
+    await renderApp(flagUrl("route-optimizer-v2"));
     expect(await screen.findByRole("heading", { level: 1, name: "route-optimizer-v2" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Rollout percentage" })).toHaveAttribute("aria-valuenow", "25");
     expect(screen.getByRole("img", { name: /25 of 100 sample users/ })).toBeInTheDocument();
@@ -251,13 +251,13 @@ describe("flag detail", () => {
   });
 
   it("explains itself when the flag does not exist", async () => {
-    renderApp(flagUrl("no-such-flag"));
+    await renderApp(flagUrl("no-such-flag"));
     expect(await screen.findByRole("heading", { level: 2, name: "No flag called no-such-flag" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to all flags" })).toHaveAttribute("href", FLAGS_URL);
   });
 
   it("previews a rollout change without saving it: the grid lights exactly the new share", async () => {
-    const { user } = renderApp(flagUrl("bulk-label-print"), { env: "staging" });
+    const { user } = await renderApp(flagUrl("bulk-label-print"), { env: "staging" });
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     expect(slider).toHaveAttribute("aria-valuenow", "50");
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
@@ -274,7 +274,7 @@ describe("flag detail", () => {
   });
 
   it("marks squares that would be REMOVED when the rollout is lowered", async () => {
-    const { user } = renderApp(flagUrl("bulk-label-print"), { env: "staging" });
+    const { user } = await renderApp(flagUrl("bulk-label-print"), { env: "staging" });
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     slider.focus();
     await user.keyboard("{PageDown}"); // minus 10
@@ -284,7 +284,7 @@ describe("flag detail", () => {
   });
 
   it("Discard puts the draft back", async () => {
-    const { user } = renderApp(flagUrl("bulk-label-print"), { env: "staging" });
+    const { user } = await renderApp(flagUrl("bulk-label-print"), { env: "staging" });
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     slider.focus();
     await user.keyboard("{End}");
@@ -295,7 +295,7 @@ describe("flag detail", () => {
   });
 
   it("applies in Staging with one click, then records the change", async () => {
-    const { user } = renderApp(flagUrl("bulk-label-print"), { env: "staging" });
+    const { user } = await renderApp(flagUrl("bulk-label-print"), { env: "staging" });
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     slider.focus();
     await user.keyboard("{PageUp}");
@@ -308,7 +308,7 @@ describe("flag detail", () => {
   });
 
   it("in Production, applying needs the hold: a click does nothing", async () => {
-    const { user } = renderApp(flagUrl("route-optimizer-v2"));
+    const { user } = await renderApp(flagUrl("route-optimizer-v2"));
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     slider.focus();
     await user.keyboard("{PageUp}");
@@ -326,13 +326,13 @@ describe("flag detail", () => {
   });
 
   it("the header toggle goes through the same Production guard", async () => {
-    const { user } = renderApp(flagUrl("route-optimizer-v2"));
+    const { user } = await renderApp(flagUrl("route-optimizer-v2"));
     await user.click(await screen.findByRole("switch", { name: "Route optimizer v2 in Production" }));
     expect(screen.getByRole("dialog", { name: "Turn off route-optimizer-v2 in Production?" })).toBeInTheDocument();
   });
 
   it("follows a live update when there are no local edits", async () => {
-    const { user } = renderApp(flagUrl("route-optimizer-v2"));
+    const { user } = await renderApp(flagUrl("route-optimizer-v2"));
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     await simulateRemoteUpdate(user); // route-optimizer-v2: 25 -> 35
     await waitFor(() => expect(slider).toHaveAttribute("aria-valuenow", "35"));
@@ -341,7 +341,7 @@ describe("flag detail", () => {
   });
 
   it("keeps your edits and warns you when a live update arrives while you are editing", async () => {
-    const { user } = renderApp(flagUrl("route-optimizer-v2"));
+    const { user } = await renderApp(flagUrl("route-optimizer-v2"));
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     slider.focus();
     await user.keyboard("{Home}"); // local edit: 0%
@@ -356,7 +356,7 @@ describe("flag detail", () => {
 
 describe("rule builder", () => {
   it("adds a rule, blocks applying until it is valid, then saves it", async () => {
-    const { user } = renderApp(flagUrl("eta-dark-launch"), { env: "staging" });
+    const { user } = await renderApp(flagUrl("eta-dark-launch"), { env: "staging" });
     await user.click(await screen.findByRole("button", { name: "Add rule" }));
     expect(screen.getByText("Name the attribute to check.")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Apply to Staging" })).toBeDisabled();
@@ -373,7 +373,7 @@ describe("rule builder", () => {
   });
 
   it("checks the value against the operator", async () => {
-    const { user } = renderApp(flagUrl("eta-dark-launch"), { env: "staging" });
+    const { user } = await renderApp(flagUrl("eta-dark-launch"), { env: "staging" });
     await user.click(await screen.findByRole("button", { name: "Add rule" }));
     await user.type(screen.getByRole("combobox", { name: "Rule 1 attribute" }), "tenureMonths");
     await user.selectOptions(screen.getByRole("combobox", { name: "Rule 1 operator" }), "at least");
@@ -385,7 +385,7 @@ describe("rule builder", () => {
   });
 
   it("reorders with the arrow buttons (order decides which rule wins)", async () => {
-    const { user } = renderApp(flagUrl("instant-payouts"), { env: "staging" });
+    const { user } = await renderApp(flagUrl("instant-payouts"), { env: "staging" });
     const first = await screen.findByRole("combobox", { name: "Rule 1 attribute" });
     expect(first).toHaveValue("depot");
     expect(screen.getByRole("combobox", { name: "Rule 2 attribute" })).toHaveValue("tenureMonths");
@@ -399,7 +399,7 @@ describe("rule builder", () => {
   });
 
   it("removes a rule and shows the empty note when none are left", async () => {
-    const { user } = renderApp(flagUrl("route-optimizer-v2"), { env: "prod" });
+    const { user } = await renderApp(flagUrl("route-optimizer-v2"), { env: "prod" });
     await user.click(await screen.findByRole("button", { name: "Remove rule 1" }));
     expect(await screen.findByText(/No rules\. Everyone is decided by the rollout percentage/)).toBeInTheDocument();
     expect(screen.getByText("None.")).toBeInTheDocument(); // the "how a user is decided" summary follows the draft
@@ -408,7 +408,7 @@ describe("rule builder", () => {
 
 describe("command palette with flags", () => {
   it("finds a flag from an abbreviation and opens it", async () => {
-    const { user, router } = renderApp(FLAGS_URL);
+    const { user, router } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.keyboard("{Control>}k{/Control}");
     await user.keyboard("rtopt");
@@ -419,7 +419,7 @@ describe("command palette with flags", () => {
   });
 
   it("finds actions by what people call them, and Production actions still need the hold", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.keyboard("{Control>}k{/Control}");
     await user.keyboard("kill carrier");
@@ -433,7 +433,7 @@ describe("command palette with flags", () => {
   });
 
   it("can trigger the simulated live update", async () => {
-    const { user } = renderApp(FLAGS_URL);
+    const { user } = await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     await user.keyboard("{Control>}k{/Control}");
     await user.keyboard("simulate{Enter}");

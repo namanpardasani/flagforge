@@ -47,6 +47,10 @@ In the rollout dot grid, lit squares are ember only when the flag is on in the e
 viewed; otherwise they are `muted`. A square that differs from what is saved gets an outline: ink
 for "would be added", danger for "would be removed".
 
+On the landing page the same rule holds: ember is lit dots (users who have the flag), the pulse
+that carries "on" (a pulse carrying "off" is ink), live connections, and nothing decorative.
+Headlines there are heavy and tight (semibold, about -0.04em), with one serif italic word each.
+
 ### Production
 Any change in Production needs a deliberate hold (700ms), never a single click. This applies in
 one place in the code (`FlagGuard`), so the list, the detail page and the command palette cannot
@@ -103,5 +107,6 @@ to fill a card.
 | `src/components/blueprint/` | Frame, crosshairs, FIG captions, grain, grid, live dot |
 | `src/components/ui/` | Base primitives, restyled (see `THIRD_PARTY.md`) |
 | `src/components/shell/` | Sidebar, top bar, command palette, layout |
+| `src/landing/` | Landing page: hero dot field, boot sequence, cursor, and one file per section |
 | `/kit` route | Every token and primitive on one page, for review |
 | `design/references/` | Mood references (images are git-ignored) and `notes.txt` |

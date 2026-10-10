@@ -128,9 +128,58 @@ per flag.
 **List.** Rows stagger in once on first load. After that, filter and sort move rows with
 `layout="position"` and leaving rows fade out (`AnimatePresence mode="popLayout"`).
 
+## Landing page
+
+The landing page is the one place big moments are allowed. Every piece still follows the four rules,
+with one stated exception (line drawing, below).
+
+**Dot field (hero).** About 1,200 dots are painted into one `<canvas>`, not 1,200 elements. Dot
+state lives in typed arrays outside React. The animation loop is not always on: it stops by itself
+when every dot has settled and the cursor has left, and it never runs while the field is off screen
+or the tab is hidden. Colours are set twice per frame (one pass for unlit dots, one for lit), not
+per dot. Pixel density is capped at 2. Without canvas support a static dotted pattern is shown; with
+reduced motion the canvas is redrawn once per change with no easing and no cursor pull.
+
+**Boot sequence.** A fixed overlay, so it takes no layout space. It leaves by sliding up
+(`translateY`), about 1.2s in total, once per session, skippable by key, click or button, and
+never shown with reduced motion.
+
+**Custom cursor.** Position goes into motion values (no render per mouse move); only the shape
+(three values) is React state. Mounted only for a fine pointer with motion allowed.
+
+**Flip pulse.** One motion value (0 to 1) is turned into x/y by arithmetic along a known polyline;
+the browser is never asked to measure the SVG path. Nodes light through four state updates per trip.
+
+**Blueprint lines: the exception.** The lines draw with `pathLength`, which animates
+`stroke-dashoffset`: a repaint of a small SVG, not a transform. It is the only honest way to draw
+a line, it is driven directly by scroll position, and the SVG is small. The section is pinned with
+`position: sticky`; nothing listens to scroll events in JavaScript except Motion's `useScroll`.
+On phones and with reduced motion nothing is pinned and the drawing is simply complete.
+
+**Demos (bento, code block).** Each runs only while its card is on screen and the tab is visible.
+Typed text sits over an invisible full copy, so a card never changes size as it types. With reduced
+motion each shows a finished state and nothing loops.
+
+**Marquee and carets.** Plain CSS animations on `transform` / `opacity`. The marquee pauses on
+hover and off screen.
+
+**Wordmark.** Opacity and `translateY` written straight to nine letter elements, at most once per
+frame, smoothed by a short CSS transition.
+
+**Loading.** Sections below the hero are separate chunks, mounted when within 700px of the
+viewport, each behind a placeholder of about the right height. The dashboard is a separate chunk
+too, so the landing page does not download it.
+
+**Measured** (production build served locally, headless Edge, Lighthouse 13.5 desktop preset,
+2026-10-10): performance 99 at normal CPU speed, 99 with a 4x CPU slowdown; layout shift 0.008.
+Frame timing with the 4x slowdown: dot field with the cursor circling, 18.2ms average (7 of 220
+frames over 33ms); scrolling the whole page in 8s, 22.7ms average with one 217ms pause as a
+section mounted. At normal speed both held 16.7ms with no frame over 33ms. Re-measure after
+changes; do not quote these as current without running them again.
+
 ## Smooth scrolling
 
-Lenis is used on the landing page only. It is imported in `pages/Landing.tsx`, which is
+Lenis is used on the landing page only (touch scrolling stays native). It is imported in `pages/Landing.tsx`, which is
 lazy-loaded, so the dashboard never downloads or runs it. A dashboard should scroll exactly the way
 the operating system does.
 
