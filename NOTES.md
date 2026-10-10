@@ -17,6 +17,7 @@ Running log of decisions, tradeoffs, failure answers, and interview Q&A.
 | Rollout bucket = hash(flagKey + userId) mod 10000 | Finer than mod 100, allows 12.5% rollouts |
 | Server-side SDK first, browser SDK later | Browser code is public, so full targeting rules would leak |
 | SSE vs Socket.IO for SDK streaming | Decide in Week 2 |
+| Tenant integrity | Nothing in the DB prevents an Environment pointing at a Project from another workspace (workspaceId and projectId are separate columns). This is enforced in application code plus tenant-isolation tests. |
 
 ## Free-tier limits (checked 2026-10-09)
 | Service | Limit | Implication |
