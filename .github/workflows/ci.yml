@@ -63,12 +63,14 @@ jobs:
         run: |
           pnpm exec tsc --noEmit
           pnpm exec vitest run
+          pnpm exec tsc -p tsconfig.build.json
 
       - name: sdk
         working-directory: packages/sdk
         run: |
           pnpm exec tsc --noEmit
           pnpm exec vitest run
+          pnpm exec tsc -p tsconfig.build.json
 
       - name: server
         working-directory: apps/server
