@@ -21,7 +21,10 @@ export interface Mailer {
 export class LogMailer implements Mailer {
   constructor(private readonly logger: Logger) {}
   async send(mail: Mail): Promise<void> {
-    this.logger.info({ to: mail.to, subject: mail.subject }, `EMAIL (not sent, development only)\n${mail.text}`);
+    // One line, ending with the link, so it can be copied straight from the terminal. (The full
+    // text contains the same link, and in JSON logs its line breaks become unreadable "\n".)
+    const link = /https?:\/\/\S+/.exec(mail.text)?.[0] ?? "(no link)";
+    this.logger.info({ to: mail.to, subject: mail.subject }, `EMAIL (development, not sent) to ${mail.to}: ${mail.subject} -> ${link}`);
   }
 }
 

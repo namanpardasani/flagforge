@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { BrevoMailer, ResendMailer, parseFrom } from "../src/mail/mailer.js";
+import { pino } from "pino";
+import { BrevoMailer, LogMailer, ResendMailer, parseFrom } from "../src/mail/mailer.js";
 import { makeApp, noLimits, prisma, registerUser, resetDb, testConfig, testMailer } from "./helpers.js";
 
 const app = makeApp();
@@ -315,6 +316,16 @@ describe("mail configuration and senders", () => {
     }
     expect(message).toContain("MAIL_FROM");
     expect(message).not.toContain(secret);
+  });
+
+  it("the log sender writes ONE readable line with the recipient, the subject and the link", async () => {
+    const lines: string[] = [];
+    const logger = pino({ level: "info" }, { write: (line: string) => void lines.push(line) });
+    await new LogMailer(logger).send({ to: "tove@example.com", subject: "Confirm your email", text: "Welcome\n\nConfirm email: http://localhost:5173/verify-email#token=abc123\n\nbye" });
+    expect(lines).toHaveLength(1);
+    const entry = JSON.parse(lines[0]!) as { msg: string; to: string };
+    expect(entry.msg).toBe("EMAIL (development, not sent) to tove@example.com: Confirm your email -> http://localhost:5173/verify-email#token=abc123");
+    expect(entry.msg).not.toContain("\n");
   });
 
   it("parses the sender address", () => {
