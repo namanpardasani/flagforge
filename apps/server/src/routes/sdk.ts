@@ -13,6 +13,8 @@ import type { StreamManager } from "../realtime/streams.js";
 import { validate } from "../middleware/validate.js";
 import { loadFlagConfigs } from "../sdk/configs.js";
 import { evaluateAllSchema, evaluateSchema } from "../sdk/schemas.js";
+import { eventsSchema } from "../experiments/schemas.js";
+import type { ExperimentService } from "../experiments/service.js";
 
 /**
  * Does the client's If-None-Match header match this ETag? Handles weak validators (W/"x"),
@@ -48,9 +50,10 @@ export interface SdkDeps {
   configCache: ConfigCache;
   limiter: RateLimiter;
   limits: RateLimits;
+  experiments: ExperimentService;
 }
 
-export function sdkRouter(prisma: PrismaClient, { streams, keyCache, configCache, limiter, limits }: SdkDeps): Router {
+export function sdkRouter(prisma: PrismaClient, { streams, keyCache, configCache, limiter, limits, experiments }: SdkDeps): Router {
   const router = Router();
   const apiKey = requireApiKey(prisma, keyCache);
   // Cheap guard BEFORE any database work, so floods of bad keys cannot hammer Postgres.
@@ -126,6 +129,15 @@ export function sdkRouter(prisma: PrismaClient, { streams, keyCache, configCache
   router.post("/sdk/v1/evaluate-all", perIp, apiKey, perKey("sdk-evaluate", limits.sdkEvaluate), validate(evaluateAllSchema), async (req, res) => {
     const flags = Object.fromEntries([...(await flagsFor(req.sdk!)).values()].map((c) => [c.key, evaluateFlag(c, req.body.context)]));
     res.json({ flags });
+  });
+
+  // Experiment events from SDKs: who saw which variant, and who converted. Batched.
+  // 202 Accepted with counts: how many events arrived and how many NEW rows they produced (repeats
+  // and events for flags with no running experiment produce none). The key can only ever write to
+  // its own environment, which comes from the key itself, never from the request.
+  router.post("/sdk/v1/events", perIp, apiKey, perKey("sdk-events", limits.sdkEvents), validate(eventsSchema), async (req, res) => {
+    const { workspaceId, environmentId } = req.sdk!;
+    res.status(202).json({ accepted: req.body.events.length, ...(await experiments.ingest({ workspaceId, environmentId }, req.body.events)) });
   });
 
   return router;

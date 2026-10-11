@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 import type { PrismaClient } from "../generated/prisma/client.js";
 import { createApiKeyService } from "./apikeys/service.js";
 import { createAuthService } from "./auth/service.js";
+import { createExperimentService } from "./experiments/service.js";
 import type { Config } from "./config.js";
 import { createFlagService } from "./flags/service.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
@@ -16,6 +17,7 @@ import { createRealtime, type Realtime } from "./realtime/index.js";
 import { createRedisServices, type RedisServices } from "./redis/index.js";
 import { apiKeysRouter } from "./routes/api-keys.js";
 import { authRouter } from "./routes/auth.js";
+import { experimentsRouter } from "./routes/experiments.js";
 import { flagsRouter } from "./routes/flags.js";
 import { healthRouter, type DatabaseCheck } from "./routes/health.js";
 import { projectsRouter } from "./routes/projects.js";
@@ -81,8 +83,11 @@ export function createApp({ logger, config, prisma, checkDatabase, redis, realti
   app.use(projectsRouter(createProjectService(prisma, services.keyCache), prisma, config, rt.dashboard));
   app.use(flagsRouter(createFlagService(prisma, { bus: rt.bus, cache: services.configCache }), prisma, config));
   app.use(apiKeysRouter(createApiKeyService(prisma, rt.bus, services.keyCache), prisma, config));
+  const experiments = createExperimentService(prisma);
+  app.use(experimentsRouter(experiments, prisma, config));
   app.use(
     sdkRouter(prisma, {
+      experiments,
       streams: rt.streams,
       keyCache: services.keyCache,
       configCache: services.configCache,

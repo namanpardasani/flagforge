@@ -15,6 +15,8 @@ export interface RateLimits {
   sdkEvaluate: RateRule;
   /** Opening new streams (existing streams are limited separately by the connection caps). */
   sdkStream: RateRule;
+  /** Batches of experiment events, per key. Each batch may carry up to 500 events. */
+  sdkEvents: RateRule;
 }
 
 const minute = 60_000;
@@ -30,4 +32,5 @@ export const defaultLimits: RateLimits = {
   sdkFlags: { capacity: 1200, windowMs: minute },
   sdkEvaluate: { capacity: 6000, windowMs: minute },
   sdkStream: { capacity: 60, windowMs: minute },
+  sdkEvents: { capacity: 600, windowMs: minute },
 };

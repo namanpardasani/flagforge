@@ -34,6 +34,7 @@ export const noLimits: RateLimits = {
   sdkFlags: unlimited,
   sdkEvaluate: unlimited,
   sdkStream: unlimited,
+  sdkEvents: unlimited,
 };
 
 export function makeApp(overrides: Partial<AppDeps> = {}) {
