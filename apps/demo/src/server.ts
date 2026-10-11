@@ -14,6 +14,8 @@ try {
 const flags = new FlagForgeClient({
   apiKey: config.FLAGFORGE_API_KEY,
   baseUrl: config.FLAGFORGE_URL,
+  // Report who sees which checkout and who pays, so an experiment on the featured flag has data.
+  sendEvents: true,
   // Survive a restart while FlagForge is unreachable: start from the last flags saved to disk.
   storage: new FileStorage(".flagforge-cache.json"),
 });
@@ -27,8 +29,9 @@ app.server.listen(config.PORT, config.HOST, () => {
   console.log(`Demo shop: http://localhost:${config.PORT}  (featured flag: ${config.FEATURED_FLAG})`);
 });
 
-function shutdown() {
+async function shutdown() {
   app.close();
+  await flags.flush(); // do not lose the last few events
   flags.close();
   app.server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2000).unref();

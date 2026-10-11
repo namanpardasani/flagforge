@@ -20,6 +20,22 @@ flip a flag, and watch the checkout change without reloading.
 
 Settings are environment variables; see `.env.example`.
 
+## Run an experiment on it
+
+The demo reports who sees which checkout and who pays, so FlagForge can tell whether one-tap really
+converts better.
+
+1. In the dashboard, make sure `one-tap-checkout` is **on** in the key's environment with a rollout
+   between 1% and 99% (for example 50%).
+2. Open **Experiments > New experiment**: flag `one-tap-checkout`, that environment, success event
+   `checkout-completed`. Open it and press **Start**.
+3. In the demo, press **Pay** as a few customers, then **Simulate 200 shoppers** a few times (each
+   press is 200 new pretend shoppers). The experiment page refreshes every 10 seconds.
+
+The simulated shoppers pay at **10% with the card form and 14% with one-tap. Those rates are made up**
+for the demo: the experiment is expected to find them, not to prove anything about real shoppers.
+With a few thousand shoppers it reaches a verdict; with a few hundred it will say "not enough data".
+
 ## What it shows
 
 | Try this in the dashboard | What happens here |
@@ -50,8 +66,8 @@ dashboard --> FlagForge API --(SSE: "version N")--> SDK (in this app's server)
 
 | File | What |
 |---|---|
-| `src/server.ts` | Entry point: creates the SDK client, starts the HTTP server |
-| `src/app.ts` | The HTTP server: page, event stream, health |
+| `src/server.ts` | Entry point: creates the SDK client (with `sendEvents` on), starts the HTTP server |
+| `src/app.ts` | The HTTP server: page, event stream, health, `POST /pay`, `POST /simulate` |
 | `src/page.ts` | The page, its CSS and its browser script |
 | `src/users.ts` | The four sample customers and their attributes |
 | `src/config.ts` | Environment variables, validated at startup |

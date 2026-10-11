@@ -57,7 +57,7 @@ describe("the page", () => {
     expect(config.users[0]!.attributes).toMatchObject({ plan: "pro" });
   });
 
-  it("answers only GET, and 404 for anything it does not serve", async () => {
+  it("answers GET for pages, POST only for /pay and /simulate, and 404 for anything it does not serve", async () => {
     expect((await fetch(demo.url, { method: "POST" })).status).toBe(405);
     expect((await fetch(`${demo.url}/events?user=ingrid`, { method: "DELETE" })).status).toBe(405);
     expect((await fetch(`${demo.url}/admin`)).status).toBe(404);
@@ -85,7 +85,7 @@ describe("the event stream", () => {
       { key: "one-tap-checkout", value: false, reason: "OFF" },
     ]);
     expect(first.featured).toEqual({ key: "one-tap-checkout", exists: true, value: false });
-    expect(first.sdk).toEqual({ ready: true, source: "network", stream: "connected", degraded: false, version: 1, fatal: false });
+    expect(first.sdk).toEqual({ ready: true, source: "network", stream: "connected", degraded: false, version: 1, fatal: false, events: { queued: 0, sent: 0, dropped: 0 } });
   });
 
   it("pushes a new snapshot the moment the SDK says the flags changed", async () => {
@@ -166,6 +166,136 @@ describe("the event stream", () => {
     await viewer.closed;
     expect(demo.app.viewers).toBe(0);
     expect(flags.listenerCount).toBe(0);
+  });
+});
+
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  fetch(`${demo.url}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) });
+
+describe("experiment exposures", () => {
+  it("watching the shop counts as being shown the featured flag, once", async () => {
+    const viewer = await open("ingrid");
+    await viewer.next(1);
+    flags.emitUpdate();
+    flags.emitUpdate();
+    await viewer.next(3);
+    expect(flags.recorded.filter((e) => e.type === "exposure" && e.flagKey === "one-tap-checkout")).toHaveLength(3); // the SDK itself de-duplicates; the app asks each time
+    expect(flags.recorded.every((e) => e.type === "exposure" && e.userKey === "user-ingrid")).toBe(true);
+  });
+
+  it("only the featured flag is an exposure: listing the other flags is not showing them", async () => {
+    const viewer = await open("tomasz");
+    await viewer.next(1);
+    expect(flags.recorded.map((e) => (e.type === "exposure" ? e.flagKey : ""))).toEqual(["one-tap-checkout"]);
+  });
+
+  it("a featured flag that does not exist records nothing", async () => {
+    flags.decide = () => ({ "bulk-label-print": on });
+    const viewer = await open("kenji");
+    await viewer.next(1);
+    expect(flags.recorded).toEqual([]);
+  });
+});
+
+describe("paying", () => {
+  it("records a conversion for the customer who paid, after making sure they were shown a checkout", async () => {
+    flags.decide = () => ({ "one-tap-checkout": on });
+    const res = await post("/pay", { user: "saoirse" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ user: "saoirse", paid: true, oneTap: true, event: "checkout-completed" });
+    expect(flags.recorded).toEqual([
+      { type: "exposure", flagKey: "one-tap-checkout", userKey: "user-saoirse", value: true },
+      { type: "conversion", metricKey: "checkout-completed", userKey: "user-saoirse" },
+    ]);
+  });
+
+  it("rejects unknown customers, extra fields, and anything that is not JSON", async () => {
+    expect((await post("/pay", { user: "mallory" })).status).toBe(400);
+    expect((await post("/pay", { user: "ingrid", metric: "x" })).status).toBe(400);
+    expect((await post("/pay", {})).status).toBe(400);
+    expect((await post("/pay", "not json")).status).toBe(400);
+    expect((await post("/pay", { user: "ingrid" }, { "Content-Type": "text/plain" })).status).toBe(415);
+    expect((await fetch(`${demo.url}/pay`, { method: "POST", body: "user=ingrid" })).status).toBe(415); // what a cross-site form sends
+    expect(flags.recorded).toEqual([]);
+  });
+
+  it("refuses a request that comes from another website", async () => {
+    expect((await post("/pay", { user: "ingrid" }, { Origin: "https://evil.example" })).status).toBe(403);
+    expect((await post("/simulate", { shoppers: 5 }, { Origin: "http://localhost:9999" })).status).toBe(403);
+    expect(flags.recorded).toEqual([]);
+    // The same site is fine.
+    expect((await post("/pay", { user: "ingrid" }, { Origin: demo.url })).status).toBe(200);
+  });
+
+  it("refuses an oversized body", async () => {
+    const res = await post("/pay", { user: "ingrid", pad: "x".repeat(5000) }).catch(() => null);
+    expect(res === null || res.status === 413).toBe(true);
+    expect(flags.recorded).toEqual([]);
+  });
+
+  it("GET on /pay or /simulate is not allowed", async () => {
+    expect((await fetch(`${demo.url}/pay`)).status).toBe(404);
+    expect((await fetch(`${demo.url}/simulate`)).status).toBe(404);
+    expect((await fetch(`${demo.url}/pay`, { method: "PUT" })).status).toBe(405);
+  });
+});
+
+describe("simulated shoppers", () => {
+  const sims = () => flags.recorded.filter((e) => e.type === "exposure");
+  const converted = () => flags.recorded.filter((e) => e.type === "conversion");
+
+  it("each shopper is shown the checkout (exposure) and pays with a probability that depends on which one", async () => {
+    await demo.stop();
+    // 0.12 is below the one-tap rate (14%) and above the card-form rate (10%): only one-tap shoppers pay.
+    demo = await start({ flags, random: () => 0.12 });
+    flags.decide = () => ({ "one-tap-checkout": on });
+    const res = await post("/simulate", { shoppers: 50 });
+    expect(await res.json()).toEqual({ shoppers: 50, withFlag: 50, withoutFlag: 0, conversions: 50 });
+    flags.recorded.length = 0;
+
+    flags.decide = () => ({ "one-tap-checkout": off });
+    expect(await (await post("/simulate", { shoppers: 50 })).json()).toEqual({ shoppers: 50, withFlag: 0, withoutFlag: 50, conversions: 0 });
+    expect(sims()).toHaveLength(50);
+    expect(converted()).toHaveLength(0);
+  });
+
+  it("uses the stated rates at the boundaries", async () => {
+    await demo.stop();
+    demo = await start({ flags, random: () => 0.05 }); // below both rates: everyone pays
+    flags.decide = (user) => ({ "one-tap-checkout": Number(user.key.split("-").pop()) % 2 === 0 ? on : off });
+    const res = await (await post("/simulate", { shoppers: 20 })).json();
+    expect(res).toMatchObject({ shoppers: 20, withFlag: 10, withoutFlag: 10, conversions: 20 });
+    await demo.stop();
+    demo = await start({ flags, random: () => 0.5 }); // above both: no one pays
+    expect(((await (await post("/simulate", { shoppers: 20 })).json()) as { conversions: number }).conversions).toBe(0);
+  });
+
+  it("every shopper is a different person, and each run uses new people", async () => {
+    flags.decide = () => ({ "one-tap-checkout": on });
+    await post("/simulate", { shoppers: 30 });
+    await post("/simulate", { shoppers: 30 });
+    expect(new Set(sims().map((e) => e.userKey)).size).toBe(60);
+  });
+
+  it("only converts shoppers it also exposed", async () => {
+    flags.decide = () => ({ "one-tap-checkout": on });
+    await post("/simulate", { shoppers: 200 });
+    const exposed = new Set(sims().map((e) => e.userKey));
+    expect(converted().every((e) => exposed.has(e.userKey))).toBe(true);
+  });
+
+  it("accepts 1 to 1000 shoppers and nothing else", async () => {
+    flags.decide = () => ({ "one-tap-checkout": on });
+    expect((await post("/simulate", { shoppers: 1000 })).status).toBe(200);
+    for (const shoppers of [0, -5, 1001, 2.5, "200", null, 1e9]) expect((await post("/simulate", { shoppers })).status).toBe(400);
+    expect((await post("/simulate", {})).status).toBe(400);
+    expect((await post("/simulate", { shoppers: 5, extra: true })).status).toBe(400);
+  });
+
+  it("announces its made-up rates so the page can say they are made up", async () => {
+    const config = (await (await fetch(`${demo.url}/api/config`)).json()) as { simulation: Record<string, number>; conversionEvent: string };
+    expect(config.simulation).toMatchObject({ conversionWithout: 0.1, conversionWith: 0.14, maxShoppers: 1000 });
+    expect(config.conversionEvent).toBe("checkout-completed");
   });
 });
 

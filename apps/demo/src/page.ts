@@ -37,15 +37,23 @@ export const PAGE_HTML = `<!doctype html>
       <div class="variant" id="variant-form">
         <div class="fields"><span class="field">Card number</span><span class="field">MM/YY</span><span class="field">CVC</span></div>
         <span class="field wide">Name on card</span>
-        <span class="button outline">Pay 184,00 kr</span>
+        <button type="button" class="button outline" id="pay-form">Pay 184,00 kr</button>
       </div>
       <div class="variant" id="variant-onetap" hidden>
         <div class="row field"><span class="dim">Saved card</span><span class="mono">&bull;&bull;&bull;&bull; 4417</span></div>
         <p class="dim small">Receipt goes to the address on file.</p>
-        <span class="button solid">Pay in one tap</span>
+        <button type="button" class="button solid" id="pay-onetap">Pay in one tap</button>
       </div>
     </div>
     <p class="small dim" id="featured-note"></p>
+    <p class="small" id="pay-result" role="status" aria-live="polite"></p>
+
+    <div class="traffic">
+      <p class="caption">Traffic for an experiment</p>
+      <p class="small dim" id="traffic-note"></p>
+      <button type="button" class="small-button" id="simulate">Simulate 200 shoppers</button>
+      <p class="small" id="simulate-result" role="status" aria-live="polite"></p>
+    </div>
   </section>
 
   <section class="pane" aria-labelledby="sdk-title">
@@ -58,6 +66,7 @@ export const PAGE_HTML = `<!doctype html>
     </table>
     <p class="small dim" id="empty" hidden>This environment has no flags yet. Create one in the dashboard and it appears here by itself.</p>
     <p class="small dim foot">Decisions are made on this app's server from rules the SDK already holds: no request to FlagForge per page. The browser receives only the answers, never the rules or the API key. Last change received <span class="mono" id="at">never</span>.</p>
+    <p class="small dim" id="events-line"></p>
   </section>
 </main>
 <script src="/app.js" defer></script>
@@ -91,6 +100,13 @@ h1, h2 { margin: 16px 0 0; font-size: 28px; font-weight: 500; letter-spacing: -.
 .field { border: 1px solid var(--hairline); border-radius: 2px; background: var(--sunken); padding: 10px 12px; font-size: 12px; color: var(--faint); font-family: ui-monospace, Menlo, monospace; }
 .row.field { color: var(--ink); }
 .button { margin-top: auto; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 3px; font-weight: 500; }
+button.button { width: 100%; font: inherit; font-weight: 500; cursor: pointer; color: inherit; background: transparent; padding: 0; }
+button.button:disabled { opacity: .5; cursor: progress; }
+.traffic { margin-top: 32px; max-width: 360px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+.traffic .caption { margin: 0 0 8px; }
+.small-button { height: 30px; padding: 0 12px; margin-top: 10px; border: 1px solid var(--hairline); border-radius: 2px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+.small-button:hover { border-color: var(--strong); background: var(--raised); }
+.small-button:disabled { opacity: .5; cursor: progress; }
 .button.outline { border: 1px solid var(--strong); } .button.solid { background: var(--ink); color: var(--canvas); }
 table { width: 100%; margin-top: 20px; border-collapse: collapse; }
 th { text-align: left; padding: 8px 8px 8px 0; border-bottom: 1px solid var(--hairline); }
@@ -171,6 +187,8 @@ export const APP_JS = `
       body.appendChild(row);
     });
     $("empty").hidden = snapshot.flags.length > 0;
+    var ev = sdk.events;
+    $("events-line").textContent = ev ? "Experiment events: " + ev.sent + " sent, " + ev.queued + " waiting" + (ev.dropped ? ", " + ev.dropped + " dropped" : "") + "." : "";
 
     var changed = !previous.values || !sameUser || snapshot.flags.some(function (f) { return previous.values[f.key] !== f.value; }) || Object.keys(previous.values).length !== snapshot.flags.length;
     if (changed) $("at").textContent = new Date(snapshot.at).toLocaleTimeString();
@@ -178,7 +196,9 @@ export const APP_JS = `
     snapshot.flags.forEach(function (f) { previous.values[f.key] = f.value; });
   }
 
-  function watch(userId) {
+  var userId = null;
+  function watch(id) {
+    userId = id;
     if (source) source.close();
     Array.prototype.forEach.call($("users").children, function (button) {
       button.setAttribute("aria-pressed", String(button.dataset.user === userId));
@@ -193,7 +213,40 @@ export const APP_JS = `
     source.onerror = function () { showStatus("demo server unreachable, retrying", "bad"); };
   }
 
+  // POST helper: JSON in, JSON out. The server refuses anything that is not JSON from this same site.
+  function post(path, body) {
+    return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(function (response) {
+      return response.json().then(function (data) { if (!response.ok) throw new Error(data.error || "Request failed"); return data; });
+    });
+  }
+
+  function pay() {
+    var buttons = [$("pay-form"), $("pay-onetap")];
+    buttons.forEach(function (b) { b.disabled = true; });
+    post("/pay", { user: userId }).then(function (result) {
+      $("pay-result").textContent = "Paid with the " + (result.oneTap ? "one-tap" : "card form") + " checkout. Recorded as " + result.event + " for this customer.";
+    }).catch(function (error) {
+      $("pay-result").textContent = "Could not record the payment: " + error.message;
+    }).then(function () { buttons.forEach(function (b) { b.disabled = false; }); });
+  }
+  $("pay-form").addEventListener("click", pay);
+  $("pay-onetap").addEventListener("click", pay);
+
+  var SHOPPERS = 200;
+  $("simulate").addEventListener("click", function () {
+    var button = $("simulate");
+    button.disabled = true;
+    $("simulate-result").textContent = "Sending...";
+    post("/simulate", { shoppers: SHOPPERS }).then(function (r) {
+      $("simulate-result").textContent = r.shoppers + " shoppers: " + r.withFlag + " saw one-tap, " + r.withoutFlag + " saw the card form, " + r.conversions + " paid.";
+    }).catch(function (error) {
+      $("simulate-result").textContent = "Could not simulate: " + error.message;
+    }).then(function () { button.disabled = false; });
+  });
+
   fetch("/api/config").then(function (response) { return response.json(); }).then(function (config) {
+    var sim = config.simulation;
+    $("traffic-note").textContent = "Pretend shoppers pay at " + Math.round(sim.conversionWithout * 100) + "% with the card form and " + Math.round(sim.conversionWith * 100) + "% with one-tap. Those rates are made up for this demo. An experiment on " + config.featuredFlag + " that measures " + config.conversionEvent + " should find them again.";
     config.users.forEach(function (user) {
       var button = document.createElement("button");
       button.type = "button";

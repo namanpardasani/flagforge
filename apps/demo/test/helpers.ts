@@ -5,11 +5,21 @@ import { createDemoApp, type DemoAppOptions, type FlagSource } from "../src/app.
 /** A stand-in for the SDK client: tests decide what each user gets and when "the flags changed". */
 export class FakeFlags implements FlagSource {
   decide: (user: EvaluationContext) => Record<string, EvaluationDetail> = () => ({});
-  status: ClientStatus = { ready: true, source: "network", consecutiveFailures: 0, stream: "connected", streamDegraded: false, version: 1, fatal: false };
+  status: ClientStatus = { ready: true, source: "network", consecutiveFailures: 0, stream: "connected", streamDegraded: false, version: 1, fatal: false, events: { queued: 0, sent: 0, dropped: 0 } };
+  /** Every exposure and conversion the app recorded, in order, like the SDK's event queue. */
+  recorded: Array<{ type: "exposure"; flagKey: string; userKey: string; value: boolean } | { type: "conversion"; metricKey: string; userKey: string }> = [];
   #listeners = new Set<() => void>();
 
   allFlags(user: EvaluationContext) {
     return this.decide(user);
+  }
+  evaluate(flagKey: string, user: EvaluationContext): EvaluationDetail {
+    const detail = this.decide(user)[flagKey] ?? { value: false, reason: "FLAG_NOT_FOUND" as const };
+    if (detail.reason !== "FLAG_NOT_FOUND") this.recorded.push({ type: "exposure", flagKey, userKey: user.key, value: detail.value });
+    return detail;
+  }
+  track(metricKey: string, user: EvaluationContext) {
+    this.recorded.push({ type: "conversion", metricKey, userKey: user.key });
   }
   on(_event: "update", listener: () => void) {
     this.#listeners.add(listener);
