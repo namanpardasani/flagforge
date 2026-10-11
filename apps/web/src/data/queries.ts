@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchActivity, fetchApiKeys, fetchAuditPage, fetchMembers, fetchFlags, fetchProjects, fetchWorkspaces } from "@/api/endpoints";
+import { fetchActivity, fetchApiKeys, fetchExperimentResults, fetchExperiments, fetchAuditPage, fetchMembers, fetchFlags, fetchProjects, fetchWorkspaces } from "@/api/endpoints";
 import { useSession } from "@/api/session";
 import { can, type Project, type Role } from "@/api/types";
 import { useLiveStatus } from "@/stores/live";
@@ -19,6 +19,8 @@ export const queryKeys = {
   flags: (projectId: string) => ["flags", projectId] as const,
   activity: (projectId: string) => ["activity", projectId] as const,
   auditLog: (workspaceId: string) => ["audit-log", workspaceId] as const,
+  experiments: (projectId: string) => ["experiments", projectId] as const,
+  experiment: (experimentId: string) => ["experiment", experimentId] as const,
   members: (workspaceId: string) => ["members", workspaceId] as const,
   apiKeys: (environmentId: string) => ["api-keys", environmentId] as const,
 };
@@ -77,4 +79,16 @@ export const useAuditLog = (workspaceId: string | undefined, role: Role | undefi
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: workspaceId !== undefined && can.readAuditLog(role),
+  });
+
+export const useExperiments = (project: Project | undefined) =>
+  useQuery({ queryKey: queryKeys.experiments(project?.id ?? "none"), queryFn: () => fetchExperiments(project!), enabled: project !== undefined });
+
+/** One experiment with its numbers. Refreshes by itself every 10 seconds while it is running, since events keep arriving. */
+export const useExperimentResults = (project: Project | undefined, experimentId: string) =>
+  useQuery({
+    queryKey: queryKeys.experiment(experimentId),
+    queryFn: () => fetchExperimentResults(project!, experimentId),
+    enabled: project !== undefined,
+    refetchInterval: (query) => (query.state.data?.experiment.status === "RUNNING" ? 10_000 : false),
   });

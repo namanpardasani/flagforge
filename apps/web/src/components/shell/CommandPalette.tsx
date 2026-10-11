@@ -49,7 +49,7 @@ export function CommandPalette() {
   const scope = useScope();
   const navigate = useNavigate();
   const params = useParams();
-  const page = params["page"] ?? (params["flagKey"] ? "flags" : "overview");
+  const page = params["page"] ?? (params["flagKey"] ? "flags" : params["experimentId"] ? "experiments" : "overview");
   const flags = useFlags(scope.project).data ?? [];
   const environments = scope.project?.environments ?? [];
   const canEdit = can.editFlags(scope.role);

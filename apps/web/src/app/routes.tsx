@@ -30,6 +30,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="overview" replace /> },
       { path: "flags/:flagKey", lazy: async () => ({ Component: (await dashboard()).FlagDetailPage }) },
+      { path: "experiments/:experimentId", lazy: async () => ({ Component: (await dashboard()).ExperimentDetailPage }) },
       { path: ":page", lazy: async () => ({ Component: (await dashboard()).ProjectPage }) },
     ],
   },

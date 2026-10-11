@@ -10,6 +10,7 @@ export const paths = {
   welcome: "/welcome",
   project: (workspaceSlug: string, projectKey: string, page = "overview") => `/w/${workspaceSlug}/p/${projectKey}/${page}`,
   flag: (workspaceSlug: string, projectKey: string, flagKey: string) => `/w/${workspaceSlug}/p/${projectKey}/flags/${flagKey}`,
+  experiment: (workspaceSlug: string, projectKey: string, experimentId: string) => `/w/${workspaceSlug}/p/${projectKey}/experiments/${experimentId}`,
   kit: "/kit",
   landing: "/landing",
 };

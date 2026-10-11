@@ -1,4 +1,4 @@
-import { Flag, KeyRound, LayoutGrid, Layers, ScrollText, Users, type LucideIcon } from "lucide-react";
+import { Flag, FlaskConical, KeyRound, LayoutGrid, Layers, ScrollText, Users, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   page: string;
@@ -18,6 +18,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { page: "overview", label: "Overview", icon: LayoutGrid },
       { page: "flags", label: "Flags", icon: Flag },
+      { page: "experiments", label: "Experiments", icon: FlaskConical },
       { page: "environments", label: "Environments", icon: Layers },
       { page: "api-keys", label: "API keys", icon: KeyRound },
     ],

@@ -37,7 +37,7 @@ export function Sidebar() {
   const scope = useScope();
   const params = useParams();
   // A flag key belongs to one project, so from a flag's page the project links go to the flag LIST.
-  const page = params["page"] ?? (params["flagKey"] ? "flags" : "overview");
+  const page = params["page"] ?? (params["flagKey"] ? "flags" : params["experimentId"] ? "experiments" : "overview");
   const [hovered, setHovered] = useState<string | null>(null);
 
   return (

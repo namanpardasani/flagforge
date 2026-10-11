@@ -4,6 +4,7 @@ import { paths, useScope } from "@/components/shell/use-scope";
 import { ApiKeysPage } from "./ApiKeys";
 import { AuditLogPage } from "./AuditLog";
 import { EnvironmentsPage } from "./Environments";
+import { ExperimentsPage } from "./Experiments";
 import { FlagsPage } from "./Flags";
 import { MembersPage } from "./Members";
 import { OverviewPage } from "./Overview";
@@ -17,6 +18,7 @@ export function ProjectPage() {
   if (page === "members") return <MembersPage />;
   if (page === "environments") return <EnvironmentsPage />;
   if (page === "audit-log") return <AuditLogPage />;
+  if (page === "experiments") return <ExperimentsPage />;
 
   return <NotFound />;
 }

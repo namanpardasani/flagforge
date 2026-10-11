@@ -1,3 +1,4 @@
+import { analyzeExperiment } from "@flagforge/core";
 import { ACTIVITY, FLAGS, PROJECTS, WORKSPACES, type Flag as SeedFlag, type TargetingRule as SeedRule } from "./seed";
 
 /**
@@ -122,6 +123,9 @@ export function createFakeServer() {
   let remoteTurn = 0;
   let calls: Array<{ method: string; path: string; authorization: string | null }> = [];
   let inFlight = 0;
+  interface FakeExperiment { id: string; projectId: string; environmentId: string; flagId: string; name: string; hypothesis: string | null; metricKey: string; status: "DRAFT" | "RUNNING" | "STOPPED"; startedAt: string | null; stoppedAt: string | null; createdAt: string; flag: { key: string; name: string }; environment: { key: string; name: string } }
+  let experiments: FakeExperiment[] = [];
+  let experimentCounts: Record<string, { control: { users: number; conversions: number }; treatment: { users: number; conversions: number } }> = {};
   let failNextRead: { pattern: RegExp; status: number } | null = null;
   let projectEnvs: Record<string, Array<{ key: string; name: string }>> = {};
   let members: Array<{ workspaceId: string; userId: string; name: string; email: string; role: Role; joinedAt: string }> = [];
@@ -136,6 +140,8 @@ export function createFakeServer() {
     projectEnvs = Object.fromEntries(PROJECTS.map((p) => [p.id, ENVS.map((e) => ({ key: e.key, name: e.name }))]));
     for (const stream of [...streams]) stream.close();
     flags = FLAGS.map(wireFlag);
+    experiments = [];
+    experimentCounts = {};
     members = [
       { workspaceId: "ws_halden", userId: "u_jonas", name: "Jonas Reyes", email: "jonas@halden.example", role: "ADMIN", joinedAt: "2026-02-01T00:00:00Z" },
       { workspaceId: "ws_halden", userId: "u_tove", name: "Tove Lind", email: "tove@halden.example", role: "MEMBER", joinedAt: "2026-03-01T00:00:00Z" },
@@ -368,6 +374,69 @@ export function createFakeServer() {
       return new Response(null, { status: 204 });
     }
 
+    // ---- experiments (mirrors apps/server/src/experiments) ----
+    const expRoute = /^\/experiments(?:\/([^/]+)(?:\/(start|stop))?)?$/.exec(tail);
+    if (expRoute) {
+      const [, expId, action] = expRoute;
+      const mine = experiments.filter((e) => e.projectId === proj.id);
+      const state = (e: FakeExperiment) => flags.find((f) => f.id === e.flagId)?.environments.find((x) => x.environmentId === e.environmentId);
+      if (!expId && method === "GET") return json(200, { experiments: [...mine].reverse() });
+      if (!expId && method === "POST") {
+        const denied = need("MEMBER");
+        if (denied) return denied;
+        const flag = flags.find((f) => f.id === body?.["flagId"] && f.projectId === proj.id);
+        if (!flag) return fail(404, "FLAG_NOT_FOUND", "Flag not found");
+        const environment = envsOf(proj.id).find((e) => envId(proj.id, e.key) === body?.["environmentId"]);
+        if (!environment) return fail(404, "ENVIRONMENT_NOT_FOUND", "Environment not found");
+        const created: FakeExperiment = {
+          id: `exp_${++sequence}`, projectId: proj.id, environmentId: envId(proj.id, environment.key), flagId: flag.id, name: String(body?.["name"]),
+          hypothesis: typeof body?.["hypothesis"] === "string" ? body["hypothesis"] : null, metricKey: String(body?.["metricKey"]), status: "DRAFT", startedAt: null, stoppedAt: null,
+          createdAt: now(), flag: { key: flag.key, name: flag.name }, environment: { key: environment.key, name: environment.name },
+        };
+        experiments.push(created);
+        return json(201, created);
+      }
+      const experiment = mine.find((e) => e.id === expId);
+      if (!experiment) return fail(404, "EXPERIMENT_NOT_FOUND", "Experiment not found");
+      if (method === "GET") {
+        const st = state(experiment);
+        const counts = experimentCounts[experiment.id] ?? { control: { users: 0, conversions: 0 }, treatment: { users: 0, conversions: 0 } };
+        const share = (st?.rolloutPercentage ?? 100) / 100;
+        const ruleCount = st?.rules.length ?? 0;
+        const splitKnown = ruleCount === 0 && share > 0 && share < 1;
+        let analysis = null as ReturnType<typeof analyzeExperiment> | null;
+        if (share > 0 && share < 1) analysis = analyzeExperiment(counts.control, counts.treatment, { expectedTreatmentShare: share });
+        else if (counts.control.users > 0 && counts.treatment.users > 0) analysis = analyzeExperiment(counts.control, counts.treatment, { expectedTreatmentShare: 0.5 });
+        if (analysis && !splitKnown) analysis = { ...analysis, sampleRatio: { ...analysis.sampleRatio, pValue: null, mismatch: false } };
+        return json(200, { ...experiment, flagState: { enabled: st?.enabled ?? false, rolloutPercentage: share * 100, ruleCount }, groups: counts, analysis, sampleRatioChecked: analysis !== null && splitKnown });
+      }
+      if (method === "DELETE") {
+        const denied = need("ADMIN");
+        if (denied) return denied;
+        experiments = experiments.filter((e) => e.id !== experiment.id);
+        return new Response(null, { status: 204 });
+      }
+      if (method === "POST" && action) {
+        const denied = need("MEMBER");
+        if (denied) return denied;
+        if (action === "start") {
+          if (experiment.status === "RUNNING") return fail(409, "ALREADY_RUNNING", "This experiment is already running");
+          if (experiment.status === "STOPPED") return fail(409, "EXPERIMENT_FINISHED", "A stopped experiment cannot be restarted: its data would mix two periods. Create a new one");
+          const st = state(experiment);
+          if (!st?.enabled) return fail(409, "FLAG_OFF", "Turn the flag on in this environment first: while it is off nobody is in the treatment group");
+          if (st.rules.length === 0 && (st.rolloutPercentage <= 0 || st.rolloutPercentage >= 100)) return fail(409, "NO_SPLIT", "Set the rollout between 1% and 99% first: an experiment needs some users with the flag and some without");
+          if (mine.some((e) => e.id !== experiment.id && e.status === "RUNNING" && e.flagId === experiment.flagId && e.environmentId === experiment.environmentId)) return fail(409, "ANOTHER_EXPERIMENT_RUNNING", "Another experiment is already running on this flag in this environment. Stop it first");
+          experiment.status = "RUNNING";
+          experiment.startedAt = now();
+        } else {
+          if (experiment.status !== "RUNNING") return fail(409, "NOT_RUNNING", "Only a running experiment can be stopped");
+          experiment.status = "STOPPED";
+          experiment.stoppedAt = now();
+        }
+        return json(200, experiment);
+      }
+    }
+
     const keysRoute = /^\/environments\/([^/]+)\/api-keys(?:\/([^/]+))?$/.exec(tail);
     if (keysRoute) {
       const denied = need("ADMIN");
@@ -522,6 +591,23 @@ export function createFakeServer() {
     failNextWrite(error?: { status: number; code: string; message: string }) {
       failWrites = 1;
       if (error) failWith = error;
+    },
+    /** Creates an experiment directly, as if made earlier. Returns its id. */
+    seedExperiment(input: { projectKey?: string; flagKey: string; envKey: string; name?: string; metricKey?: string; status?: "DRAFT" | "RUNNING" | "STOPPED" }) {
+      const proj = PROJECTS.find((p) => p.key === (input.projectKey ?? "dispatch-api"))!;
+      const flag = flags.find((f) => f.projectId === proj.id && f.key === input.flagKey)!;
+      const environment = envsOf(proj.id).find((e) => e.key === input.envKey)!;
+      const experiment: FakeExperiment = {
+        id: `exp_${++sequence}`, projectId: proj.id, environmentId: envId(proj.id, environment.key), flagId: flag.id, name: input.name ?? "Seeded experiment", hypothesis: null,
+        metricKey: input.metricKey ?? "checkout-completed", status: input.status ?? "RUNNING", startedAt: input.status === "DRAFT" ? null : now(), stoppedAt: input.status === "STOPPED" ? now() : null,
+        createdAt: now(), flag: { key: flag.key, name: flag.name }, environment: { key: environment.key, name: environment.name },
+      };
+      experiments.push(experiment);
+      return experiment.id;
+    },
+    /** What the server would have counted from SDK events. */
+    setExperimentCounts(id: string, control: { users: number; conversions: number }, treatment: { users: number; conversions: number }) {
+      experimentCounts[id] = { control, treatment };
     },
     /** Pads the log with older entries, to exercise paging. */
     addOldAuditEntries(count: number) {

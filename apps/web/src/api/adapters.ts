@@ -1,6 +1,6 @@
 import type { Condition, Operator } from "@flagforge/core";
 import { z } from "zod";
-import { rememberEnvironments, type ApiKey, type Member, type Activity, type Environment, type Flag, type FlagState, type Project, type TargetingRule, type User, type Workspace } from "./types";
+import { rememberEnvironments, type Experiment, type ExperimentResults, type ApiKey, type Member, type Activity, type Environment, type Flag, type FlagState, type Project, type TargetingRule, type User, type Workspace } from "./types";
 
 /**
  * What the server sends (checked with Zod as it arrives) and how it becomes what the screens use.
@@ -159,6 +159,14 @@ export function toAuditEntry(entry: AuditEntry): Activity {
     const before = (meta["before"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
     const after = (meta["after"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
     detail = before.fallthroughBps !== after.fallthroughBps ? `Rollout ${percent(before.fallthroughBps)} to ${percent(after.fallthroughBps)}` : `Rules updated (${after.rules?.length ?? 0})`;
+  } else if (entry.entityType === "experiment") {
+    const name = text(meta["name"]);
+    const label = name ? `"${name}"` : "experiment";
+    detail =
+      entry.action === "experiment.created" ? `Created experiment ${label}` :
+      entry.action === "experiment.started" ? `Started experiment ${label}` :
+      entry.action === "experiment.stopped" ? `Stopped experiment ${label}` :
+      entry.action === "experiment.deleted" ? `Deleted experiment ${label}` : entry.action;
   } else if (entry.entityType === "api_key") {
     subject = text(meta["name"]) ?? text(meta["prefix"]) ?? entry.entityId;
     const prefix = text(meta["prefix"]);
@@ -201,3 +209,66 @@ const memberSchema = z.object({
 export const membersSchema = z.object({ members: z.array(memberSchema) });
 export { memberSchema };
 export const toMember = (m: z.infer<typeof memberSchema>): Member => ({ userId: m.userId, name: m.user.name, email: m.user.email, role: m.role, joinedAt: m.joinedAt });
+
+const groupCounts = z.object({ users: z.number(), conversions: z.number() });
+const groupResult = groupCounts.extend({ rate: z.number() });
+const experimentSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  environmentId: z.string(),
+  flagId: z.string(),
+  name: z.string(),
+  hypothesis: z.string().nullable(),
+  metricKey: z.string(),
+  status: z.enum(["DRAFT", "RUNNING", "STOPPED"]),
+  startedAt: z.string().nullable(),
+  stoppedAt: z.string().nullable(),
+  createdAt: z.string(),
+  flag: z.object({ key: z.string(), name: z.string() }),
+  environment: z.object({ key: z.string(), name: z.string() }),
+});
+export { experimentSchema };
+export const experimentsSchema = z.object({ experiments: z.array(experimentSchema) });
+const analysisSchema = z.object({
+  control: groupResult,
+  treatment: groupResult,
+  absoluteLift: z.number(),
+  relativeLift: z.number().nullable(),
+  zScore: z.number().nullable(),
+  pValue: z.number().nullable(),
+  confidenceInterval: z.object({ low: z.number(), high: z.number() }).nullable(),
+  verdict: z.enum(["not_enough_data", "no_difference_detected", "treatment_better", "treatment_worse"]),
+  sampleRatio: z.object({ expectedTreatmentShare: z.number(), observedTreatmentShare: z.number().nullable(), pValue: z.number().nullable(), mismatch: z.boolean() }),
+});
+export const resultsSchema = experimentSchema.extend({
+  flagState: z.object({ enabled: z.boolean(), rolloutPercentage: z.number(), ruleCount: z.number() }),
+  groups: z.object({ control: groupCounts, treatment: groupCounts }),
+  analysis: analysisSchema.nullable(),
+  sampleRatioChecked: z.boolean(),
+});
+
+export const toExperiment = (e: z.infer<typeof experimentSchema>): Experiment => ({
+  id: e.id,
+  projectId: e.projectId,
+  name: e.name,
+  hypothesis: e.hypothesis ?? "",
+  metricKey: e.metricKey,
+  status: e.status,
+  flagId: e.flagId,
+  flagKey: e.flag.key,
+  flagName: e.flag.name,
+  environmentId: e.environmentId,
+  environmentKey: e.environment.key,
+  environmentName: e.environment.name,
+  startedAt: e.startedAt,
+  stoppedAt: e.stoppedAt,
+  createdAt: e.createdAt,
+});
+
+export const toResults = (r: z.infer<typeof resultsSchema>): ExperimentResults => ({
+  experiment: toExperiment(r),
+  flagState: r.flagState,
+  groups: r.groups,
+  analysis: r.analysis,
+  sampleRatioChecked: r.sampleRatioChecked,
+});

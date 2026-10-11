@@ -16,7 +16,7 @@ interface TopBarProps {
 export function TopBar({ crumbs }: TopBarProps) {
   const { collapsed, toggleCollapsed, env, setPaletteOpen } = useShell();
   const scope = useScope();
-  const { page, flagKey } = useParams();
+  const { page, flagKey, experimentId } = useParams();
 
   const start: Crumb[] = [
     { label: scope.workspace?.name ?? scope.workspaceSlug, to: `/w/${scope.workspaceSlug}` },
@@ -27,7 +27,9 @@ export function TopBar({ crumbs }: TopBarProps) {
     crumbs ??
     (flagKey
       ? [...start, { label: "Flags", to: paths.project(scope.workspaceSlug, scope.projectKey, "flags") }, { label: flagKey, current: true, mono: true }]
-      : [...start, { label: pageLabel(page), current: true }]);
+      : experimentId
+        ? [...start, { label: "Experiments", to: paths.project(scope.workspaceSlug, scope.projectKey, "experiments") }, { label: "Experiment", current: true }]
+        : [...start, { label: pageLabel(page), current: true }]);
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline px-3">

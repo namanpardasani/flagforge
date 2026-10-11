@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { fromRule } from "@/api/adapters";
-import { addMember, changeMemberRole, createApiKey, createEnvironment, deleteEnvironment, removeMember, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
+import { createExperiment, deleteExperiment, startExperiment, stopExperiment, addMember, changeMemberRole, createApiKey, createEnvironment, deleteEnvironment, removeMember, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
 import { connectProjectStream } from "@/api/stream";
 import { envName, stateOf, type Role, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
 import { flash, type FlashKind } from "@/stores/flash";
@@ -192,6 +192,45 @@ export function useEnvironmentMutations(project: Project | undefined) {
       onSuccess: (_, input) => toast(`${input.name} deleted`, { detail: "Its flag settings and API keys are gone.", tone: "danger" }),
       onError: (error) => toast("Could not delete the environment", { detail: error.message, tone: "danger" }),
       onSettled: refresh,
+    }),
+  };
+}
+
+// ---- experiments ---------------------------------------------------------------------------------
+
+/** Not optimistic: starting depends on rules only the server checks, and stopping or deleting is final. */
+export function useExperimentMutations(project: Project | undefined) {
+  const client = useQueryClient();
+  const projectId = project?.id ?? "none";
+  const refresh = (experimentId?: string) => {
+    void client.invalidateQueries({ queryKey: queryKeys.experiments(projectId) });
+    if (experimentId) void client.invalidateQueries({ queryKey: queryKeys.experiment(experimentId) });
+    void client.invalidateQueries({ queryKey: queryKeys.activity(projectId) });
+  };
+  const failed = (title: string) => (error: Error) => toast(title, { detail: error.message, tone: "danger" });
+  return {
+    create: useMutation({
+      mutationFn: (input: { name: string; hypothesis?: string; flagId: string; environmentId: string; metricKey: string }) => createExperiment(project!, input),
+      onSuccess: (experiment) => toast(`${experiment.name} created`, { detail: "A draft. Start it when the flag is set up." }),
+      onSettled: () => refresh(),
+    }),
+    start: useMutation({
+      mutationFn: (experimentId: string) => startExperiment(project!, experimentId),
+      onSuccess: (experiment) => toast(`${experiment.name} is running`, { detail: "Data counts from now on.", tone: "live" }),
+      onError: failed("Could not start the experiment"),
+      onSettled: (_, __, experimentId) => refresh(experimentId),
+    }),
+    stop: useMutation({
+      mutationFn: (experimentId: string) => stopExperiment(project!, experimentId),
+      onSuccess: (experiment) => toast(`${experiment.name} stopped`, { detail: "The numbers are kept." }),
+      onError: failed("Could not stop the experiment"),
+      onSettled: (_, __, experimentId) => refresh(experimentId),
+    }),
+    remove: useMutation({
+      mutationFn: (input: { id: string; name: string }) => deleteExperiment(project!, input.id),
+      onSuccess: (_, input) => toast(`${input.name} deleted`, { detail: "Its data is gone.", tone: "danger" }),
+      onError: failed("Could not delete the experiment"),
+      onSettled: () => refresh(),
     }),
   };
 }

@@ -1,4 +1,4 @@
-import type { Condition, Operator } from "@flagforge/core";
+import type { Condition, ExperimentAnalysis, Operator } from "@flagforge/core";
 
 /**
  * The shapes the screens work with. They are close to what the server returns but not identical:
@@ -131,6 +131,38 @@ export function memberActions(actor: { id: string; role: Role | undefined }, tar
   };
 }
 
+export type ExperimentStatus = "DRAFT" | "RUNNING" | "STOPPED";
+
+/** An A/B test on one flag in one environment. */
+export interface Experiment {
+  id: string;
+  projectId: string;
+  name: string;
+  hypothesis: string;
+  /** The event your code reports when a user does the thing being measured. */
+  metricKey: string;
+  status: ExperimentStatus;
+  flagId: string;
+  flagKey: string;
+  flagName: string;
+  environmentId: string;
+  environmentKey: EnvKey;
+  environmentName: string;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  createdAt: string;
+}
+
+export interface ExperimentResults {
+  experiment: Experiment;
+  /** What the flag does in the experiment's environment right now. */
+  flagState: { enabled: boolean; rolloutPercentage: number; ruleCount: number };
+  groups: { control: { users: number; conversions: number }; treatment: { users: number; conversions: number } };
+  analysis: ExperimentAnalysis | null;
+  /** False when targeting rules decide who gets the flag, so the expected split is unknowable. */
+  sampleRatioChecked: boolean;
+}
+
 export type Targeting = Pick<FlagState, "rolloutPercentage" | "rules">;
 
 const OFF: FlagState = { enabled: false, rolloutPercentage: 100, rules: [] };
@@ -156,6 +188,8 @@ export const can = {
   manageKeys: (role: Role | undefined) => hasRole(role, "ADMIN"),
   manageMembers: (role: Role | undefined) => hasRole(role, "ADMIN"),
   manageEnvironments: (role: Role | undefined) => hasRole(role, "ADMIN"),
+  runExperiments: (role: Role | undefined) => hasRole(role, "MEMBER"),
+  deleteExperiments: (role: Role | undefined) => hasRole(role, "ADMIN"),
 };
 
 // Environment names for display. Filled in as projects load (see adapters.ts), so a component can

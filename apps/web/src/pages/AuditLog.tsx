@@ -12,13 +12,14 @@ import { useAuditLog } from "@/data/queries";
 import { cn } from "@/lib/cn";
 import { formatStamp } from "@/lib/format";
 
-type Kind = "all" | "flag" | "apikey";
+type Kind = "all" | "flag" | "experiment" | "apikey";
 const KINDS: readonly { value: Kind; label: string }[] = [
   { value: "all", label: "Everything" },
   { value: "flag", label: "Flags" },
+  { value: "experiment", label: "Experiments" },
   { value: "apikey", label: "API keys" },
 ];
-const kindOf = (entry: Activity): Exclude<Kind, "all"> | "other" => (entry.action.startsWith("flag.") ? "flag" : entry.action.startsWith("apikey.") ? "apikey" : "other");
+const kindOf = (entry: Activity): Exclude<Kind, "all"> | "other" => (entry.action.startsWith("flag.") ? "flag" : entry.action.startsWith("experiment.") ? "experiment" : entry.action.startsWith("apikey.") ? "apikey" : "other");
 
 /**
  * Every change in the workspace, newest first: who, what, and where. Written by the server in the

@@ -1,6 +1,6 @@
-import { apiKeysSchema, toAuditEntry, environmentSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
+import { experimentSchema, experimentsSchema, resultsSchema, toExperiment, toResults, apiKeysSchema, toAuditEntry, environmentSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
 import { request } from "./client";
-import type { Activity, ApiKey, Flag, Member, Role, Project, Targeting, Workspace } from "./types";
+import type { Activity, ApiKey, Experiment, ExperimentResults, Flag, Member, Role, Project, Targeting, Workspace } from "./types";
 
 /** One function per server route the dashboard uses. Each returns the app's own types. */
 
@@ -81,3 +81,21 @@ export async function fetchAuditPage(workspaceId: string, before?: string): Prom
   const page = await request("GET", `/workspaces/${workspaceId}/audit-log?limit=50${before ? `&before=${encodeURIComponent(before)}` : ""}`, { schema: auditSchema });
   return { entries: page.entries.map(toAuditEntry), nextCursor: page.nextCursor ?? null };
 }
+
+const experimentsPath = (project: Project) => `/workspaces/${project.workspaceId}/projects/${project.id}/experiments`;
+
+export const fetchExperiments = async (project: Project): Promise<Experiment[]> => (await request("GET", experimentsPath(project), { schema: experimentsSchema })).experiments.map(toExperiment);
+
+export const fetchExperimentResults = async (project: Project, experimentId: string): Promise<ExperimentResults> =>
+  toResults(await request("GET", `${experimentsPath(project)}/${experimentId}`, { schema: resultsSchema }));
+
+export const createExperiment = async (project: Project, input: { name: string; hypothesis?: string; flagId: string; environmentId: string; metricKey: string }): Promise<Experiment> =>
+  toExperiment(await request("POST", experimentsPath(project), { body: input, schema: experimentSchema }));
+
+export const startExperiment = async (project: Project, experimentId: string): Promise<Experiment> =>
+  toExperiment(await request("POST", `${experimentsPath(project)}/${experimentId}/start`, { schema: experimentSchema }));
+
+export const stopExperiment = async (project: Project, experimentId: string): Promise<Experiment> =>
+  toExperiment(await request("POST", `${experimentsPath(project)}/${experimentId}/stop`, { schema: experimentSchema }));
+
+export const deleteExperiment = (project: Project, experimentId: string): Promise<void> => request("DELETE", `${experimentsPath(project)}/${experimentId}`);
