@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # The same images as docker-compose.yml, so CI tests against what development uses.
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: flagforge
+          POSTGRES_PASSWORD: flagforge_ci
+          POSTGRES_DB: flagforge_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U flagforge -d flagforge_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      # Throwaway values for the CI-only database above. Nothing here is a real secret.
+      DATABASE_URL: postgresql://flagforge:flagforge_ci@localhost:5432/flagforge_test
+      TEST_DATABASE_URL: postgresql://flagforge:flagforge_ci@localhost:5432/flagforge_test
+      TEST_REDIS_URL: redis://localhost:6379/15
+      JWT_ACCESS_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from "packageManager" in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: core
+        working-directory: packages/core
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
+
+      - name: sdk
+        working-directory: packages/sdk
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
+
+      - name: server
+        working-directory: apps/server
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma migrate deploy
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
+
+      - name: web
+        working-directory: apps/web
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec eslint .
+          pnpm exec vitest run
+          pnpm exec vite build
+
+      - name: demo
+        working-directory: apps/demo
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
