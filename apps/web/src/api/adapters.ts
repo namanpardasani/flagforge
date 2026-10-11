@@ -19,7 +19,8 @@ const workspaceSchema = z.object({ id: z.string(), name: z.string(), slug: z.str
 export const workspacesSchema = z.object({ workspaces: z.array(workspaceSchema) });
 export { workspaceSchema };
 
-const environmentSchema = z.object({ id: z.string(), key: z.string(), name: z.string() });
+const environmentSchema = z.object({ id: z.string(), key: z.string(), name: z.string(), createdAt: z.string() });
+export { environmentSchema };
 export const projectSchema = z.object({ id: z.string(), workspaceId: z.string(), name: z.string(), key: z.string(), environments: z.array(environmentSchema) });
 export const projectsSchema = z.object({ projects: z.array(projectSchema) });
 
@@ -76,7 +77,7 @@ export const toUser = (user: z.infer<typeof userSchema>): User => ({ id: user.id
 export const toWorkspace = (w: z.infer<typeof workspaceSchema>): Workspace => ({ id: w.id, name: w.name, slug: w.slug, role: w.role });
 
 export function toProject(project: z.infer<typeof projectSchema>): Project {
-  const environments: Environment[] = project.environments.map((e) => ({ id: e.id, key: e.key, name: e.name }));
+  const environments: Environment[] = project.environments.map((e) => ({ id: e.id, key: e.key, name: e.name, createdAt: e.createdAt }));
   rememberEnvironments(environments);
   return { id: project.id, workspaceId: project.workspaceId, name: project.name, key: project.key, environments };
 }

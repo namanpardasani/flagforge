@@ -1,4 +1,4 @@
-import { apiKeysSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
+import { apiKeysSchema, environmentSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
 import { request } from "./client";
 import type { Activity, ApiKey, Flag, Member, Role, Project, Targeting, Workspace } from "./types";
 
@@ -66,3 +66,12 @@ export const changeMemberRole = async (workspaceId: string, userId: string, role
   toMember(await request("PATCH", `/workspaces/${workspaceId}/members/${userId}`, { body: { role }, schema: memberSchema }));
 
 export const removeMember = (workspaceId: string, userId: string): Promise<void> => request("DELETE", `/workspaces/${workspaceId}/members/${userId}`);
+
+const environmentsPath = (project: Project) => `/workspaces/${project.workspaceId}/projects/${project.id}/environments`;
+
+/** The server returns the new environment; the caller refetches the project list to pick it up. */
+export const createEnvironment = async (project: Project, input: { name: string; key: string }): Promise<void> => {
+  await request("POST", environmentsPath(project), { body: input, schema: environmentSchema });
+};
+
+export const deleteEnvironment = (project: Project, environmentId: string): Promise<void> => request("DELETE", `${environmentsPath(project)}/${environmentId}`);

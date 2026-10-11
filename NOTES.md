@@ -72,6 +72,8 @@ Running log of decisions, tradeoffs, failure answers, and interview Q&A.
 | Why fetch and not EventSource | EventSource cannot send an Authorization header, so the token would have to go in the URL and end up in logs. The dashboard reads the response body by hand instead |
 | Row flash without knowing who changed what | The stream only says an environment moved. The dashboard refetches the flags, compares each row with what was on screen, and flashes those that differ. A change you made yourself is already in the cache (optimistic update), so it compares equal and is not shown as someone else's |
 | Reconnect and resync | Any end of the stream reconnects with exponential backoff (1s to 30s) and jitter; 60s without a heartbeat counts as dead. Every connection starts with hello: if a version differs from the last one seen, something was missed and the flags are refetched. While the stream is not live, the flag list also polls every 15s |
+| Last environment is protected | DELETE of a project's only environment is a 409 LAST_ENVIRONMENT: a project with none has nowhere to keep flag state. The check is count-then-delete, so two simultaneous deletes of the last two environments could both pass; accepted (leaves an empty project that can get environments again) |
+| Environment changes reopen the dashboard stream | The stream effect depends on the loaded project, so creating or deleting an environment (which refetches the project) reconnects the stream with the new set |
 | Role-based hiding | The UI hides or disables what the role cannot do (viewer: no toggles; non-admin: no audit request). That is convenience only. If the server answers 403 anyway (role changed since the page loaded), the optimistic change is rolled back and the server's reason is shown |
 | Rule editing vs the API's rule shape | The server stores rules with several AND-ed conditions and typed values; the form edits one condition as text. Extra conditions are shown read-only and saved back untouched. A value that was not edited is sent back exactly as received (so numbers and booleans keep their type); a value typed in the form is sent as text, a list for "one of", or a number for comparisons |
 | Web tests use a fake server, not mocked functions | apps/web/src/test/fake-server.ts speaks the real wire format (ids, error bodies, single-use refresh tokens, SSE) and is plugged in as the client's fetch. The tests therefore run the real client, adapters, hooks and stream code |
@@ -93,10 +95,11 @@ Running log of decisions, tradeoffs, failure answers, and interview Q&A.
 ## Interview Q&A (fill in after each feature)
 
 ## Open items
+- Members can only be added if they already have an account; there are no email invitations (would need an email service and invite tokens).
+- Deleting an environment asks for a hold, not for typing its name; fine for a portfolio project, worth upgrading for real use.
 - Refresh token is in localStorage (readable by injected scripts). Stronger: an httpOnly, Secure, SameSite cookie set by the server, with the refresh route reading it. Needs server changes and CSRF thought; do before real users.
 - CORS is wide open (`cors()` with no origin list). Fine while the dev proxy makes everything same-origin; restrict to the deployed frontend origin at deploy time.
 - The dashboard treats environments with key "prod" or "production" as needing hold-to-confirm. The server has no "is production" field, so a production environment with another key is not guarded.
-- A dashboard stream subscribes to the project's environments when it connects. An environment created later is picked up at the next reconnect (at most one access-token lifetime, 15 min).
 - The flag form cannot create a rule that compares against a number or boolean with "is" (typed values are sent as text). Possible through the API; a type picker in the form would fix it.
 - Dashboard screens still to build: members, environments, API keys, full audit log (the API for all of them exists).
 - packages/core is consumed as TypeScript source (exports point at src/index.ts). Fine for tsx/Vitest/tsc; the production server build (node dist/...) must bundle it, e.g. with esbuild. Handle in the deploy phase.

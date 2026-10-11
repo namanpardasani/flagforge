@@ -19,6 +19,7 @@ export interface Environment {
   id: string;
   key: EnvKey;
   name: string;
+  createdAt: string;
 }
 
 export interface Workspace {
@@ -154,6 +155,7 @@ export const can = {
   createProjects: (role: Role | undefined) => hasRole(role, "ADMIN"),
   manageKeys: (role: Role | undefined) => hasRole(role, "ADMIN"),
   manageMembers: (role: Role | undefined) => hasRole(role, "ADMIN"),
+  manageEnvironments: (role: Role | undefined) => hasRole(role, "ADMIN"),
 };
 
 // Environment names for display. Filled in as projects load (see adapters.ts), so a component can

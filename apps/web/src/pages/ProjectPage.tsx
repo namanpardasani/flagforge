@@ -4,6 +4,7 @@ import { ALL_NAV_ITEMS } from "@/components/shell/nav";
 import { paths, useScope } from "@/components/shell/use-scope";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiKeysPage } from "./ApiKeys";
+import { EnvironmentsPage } from "./Environments";
 import { FlagsPage } from "./Flags";
 import { MembersPage } from "./Members";
 import { OverviewPage } from "./Overview";
@@ -15,6 +16,7 @@ export function ProjectPage() {
   if (page === "flags") return <FlagsPage />;
   if (page === "api-keys") return <ApiKeysPage />;
   if (page === "members") return <MembersPage />;
+  if (page === "environments") return <EnvironmentsPage />;
 
   const item = ALL_NAV_ITEMS.find((i) => i.page === page);
   return item ? <NotBuiltYet label={item.label} /> : <NotFound />;

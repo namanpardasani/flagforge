@@ -105,6 +105,14 @@ export function createProjectService(prisma: PrismaClient, keyCache: KeyCache) {
     },
 
     async deleteEnvironment(workspaceId: string, projectId: string, environmentId: string) {
+      // A project with no environments has nowhere to keep flag state, so the last one stays.
+      // (Two simultaneous deletes of the last two could both pass this check; rare, and harmless
+      // beyond leaving an empty project that can get environments again.)
+      const remaining = await prisma.environment.count({ where: { projectId, workspaceId } });
+      const exists = await prisma.environment.count({ where: { id: environmentId, projectId, workspaceId } });
+      if (exists === 1 && remaining <= 1) {
+        throw new AppError(409, "LAST_ENVIRONMENT", "A project must keep at least one environment");
+      }
       const keys = await prisma.apiKey.findMany({
         where: { workspaceId, environmentId, environment: { projectId } },
         select: { keyHash: true },

@@ -122,13 +122,17 @@ export function createFakeServer() {
   let remoteTurn = 0;
   let calls: Array<{ method: string; path: string; authorization: string | null }> = [];
   let inFlight = 0;
+  let projectEnvs: Record<string, Array<{ key: string; name: string }>> = {};
   let members: Array<{ workspaceId: string; userId: string; name: string; email: string; role: Role; joinedAt: string }> = [];
   let apiKeys: Array<{ id: string; environmentId: string; name: string; prefix: string; createdAt: string; revokedAt: string | null }> = [];
 
   const token = (kind: string) => `${kind}_${++sequence}_${Math.random().toString(36).slice(2, 8)}`;
   const now = () => new Date().toISOString();
 
+  const envsOf = (projectId: string) => projectEnvs[projectId] ?? [];
+
   function reset() {
+    projectEnvs = Object.fromEntries(PROJECTS.map((p) => [p.id, ENVS.map((e) => ({ key: e.key, name: e.name }))]));
     for (const stream of [...streams]) stream.close();
     flags = FLAGS.map(wireFlag);
     members = [
@@ -138,7 +142,7 @@ export function createFakeServer() {
     apiKeys = [{ id: "key_seed", environmentId: envId("pr_dispatch", "prod"), name: "Checkout service", prefix: "ff_Qm2xK8v", createdAt: "2026-10-08T09:02:00Z", revokedAt: null }];
     audit = seedAudit();
     roles = Object.fromEntries(WORKSPACES.map((w) => [w.id, w.role]));
-    versions = new Map(PROJECTS.flatMap((p) => ENVS.map((e) => [envId(p.id, e.key), 1] as const)));
+    versions = new Map(PROJECTS.flatMap((p) => envsOf(p.id).map((e) => [envId(p.id, e.key), 1] as const)));
     accessTokens = new Map();
     refreshTokens = new Set();
     spentRefreshTokens = new Set();
@@ -167,7 +171,7 @@ export function createFakeServer() {
     name: p.name,
     key: p.key,
     createdAt: "2026-01-01T00:00:00.000Z",
-    environments: ENVS.map((e) => ({ id: envId(p.id, e.key), key: e.key, name: e.name, createdAt: "2026-01-01T00:00:00.000Z" })),
+    environments: envsOf(p.id).map((e, i) => ({ id: envId(p.id, e.key), key: e.key, name: e.name, createdAt: `2026-01-01T00:00:0${Math.min(i, 9)}.000Z` })),
   });
 
   function bump(environmentId: string) {
@@ -184,7 +188,7 @@ export function createFakeServer() {
   }
 
   function hello(projectId: string) {
-    const environments = ENVS.map((e) => ({ environmentId: envId(projectId, e.key), key: e.key, version: versions.get(envId(projectId, e.key)) ?? 1 }));
+    const environments = envsOf(projectId).map((e) => ({ environmentId: envId(projectId, e.key), key: e.key, version: versions.get(envId(projectId, e.key)) ?? 1 }));
     return `event: hello\ndata: ${JSON.stringify({ environments })}\n\n`;
   }
 
@@ -320,11 +324,39 @@ export function createFakeServer() {
     if (!inProject || !proj) return fail(404, "PROJECT_NOT_FOUND", "Project not found");
     const tail = inProject[2] ?? "";
 
+    if (tail === "/environments" && method === "GET") return json(200, { environments: project(proj).environments });
+    if (tail === "/environments" && method === "POST") {
+      const denied = need("ADMIN");
+      if (denied) return denied;
+      const key = String(body?.["key"]);
+      if (envsOf(proj.id).some((e) => e.key === key)) return fail(409, "ENVIRONMENT_KEY_TAKEN", "An environment with this key already exists in the project");
+      envsOf(proj.id).push({ key, name: String(body?.["name"]) });
+      versions.set(envId(proj.id, key), 1);
+      for (const flag of flags.filter((f) => f.projectId === proj.id)) {
+        flag.environments.push({ environmentId: envId(proj.id, key), key, name: String(body?.["name"]), enabled: false, rules: [], rolloutPercentage: 100, updatedAt: null });
+      }
+      const created = project(proj).environments.find((e) => e.key === key)!;
+      return json(201, created);
+    }
+    const envDelete = /^\/environments\/([^/]+)$/.exec(tail);
+    if (envDelete && method === "DELETE") {
+      const denied = need("ADMIN");
+      if (denied) return denied;
+      const list = envsOf(proj.id);
+      const at = list.findIndex((e) => envId(proj.id, e.key) === envDelete[1]);
+      if (at === -1) return fail(404, "ENVIRONMENT_NOT_FOUND", "Environment not found");
+      if (list.length <= 1) return fail(409, "LAST_ENVIRONMENT", "A project must keep at least one environment");
+      const [gone] = list.splice(at, 1);
+      for (const flag of flags.filter((f) => f.projectId === proj.id)) flag.environments = flag.environments.filter((e) => e.key !== gone!.key);
+      apiKeys = apiKeys.filter((k) => k.environmentId !== envId(proj.id, gone!.key));
+      return new Response(null, { status: 204 });
+    }
+
     const keysRoute = /^\/environments\/([^/]+)\/api-keys(?:\/([^/]+))?$/.exec(tail);
     if (keysRoute) {
       const denied = need("ADMIN");
       if (denied) return denied;
-      const environment = ENVS.find((e) => envId(proj.id, e.key) === keysRoute[1]);
+      const environment = envsOf(proj.id).find((e) => envId(proj.id, e.key) === keysRoute[1]);
       if (!environment) return fail(404, "ENVIRONMENT_NOT_FOUND", "Environment not found");
       const environmentId = keysRoute[1]!;
       const publicKey = ({ environmentId: _env, ...rest }: (typeof apiKeys)[number]) => rest;
@@ -365,11 +397,11 @@ export function createFakeServer() {
         description: typeof body?.["description"] === "string" ? body["description"] : null,
         createdAt: now(),
         updatedAt: now(),
-        environments: ENVS.map((e) => ({ environmentId: envId(proj.id, e.key), key: e.key, name: e.name, enabled: false, rules: [], rolloutPercentage: 100, updatedAt: null })),
+        environments: envsOf(proj.id).map((e) => ({ environmentId: envId(proj.id, e.key), key: e.key, name: e.name, enabled: false, rules: [], rolloutPercentage: 100, updatedAt: null })),
       };
       flags = [...flags, created];
       record("flag.created", created, { projectId: proj.id });
-      for (const e of ENVS) bump(envId(proj.id, e.key));
+      for (const e of envsOf(proj.id)) bump(envId(proj.id, e.key));
       return json(201, created);
     }
 

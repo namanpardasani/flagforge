@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { fromRule } from "@/api/adapters";
-import { addMember, changeMemberRole, createApiKey, removeMember, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
+import { addMember, changeMemberRole, createApiKey, createEnvironment, deleteEnvironment, removeMember, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
 import { connectProjectStream } from "@/api/stream";
 import { envName, stateOf, type Role, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
 import { flash, type FlashKind } from "@/stores/flash";
@@ -163,6 +163,34 @@ export function useMemberMutations(workspaceId: string | undefined) {
       mutationFn: (input: { userId: string; name: string }) => removeMember(workspaceId!, input.userId),
       onSuccess: (_, input) => toast(`${input.name} removed`),
       onError: failed("Could not remove the member"),
+      onSettled: refresh,
+    }),
+  };
+}
+
+// ---- environments --------------------------------------------------------------------------------
+
+/**
+ * Environments change the shape of the whole project (every flag gains or loses a column), so after
+ * a change the project list and the flags are refetched. Not optimistic: deleting is destructive
+ * and creating needs the server to say the key is free.
+ */
+export function useEnvironmentMutations(project: Project | undefined) {
+  const client = useQueryClient();
+  const refresh = () => {
+    void client.invalidateQueries({ queryKey: queryKeys.projects(project?.workspaceId ?? "none") });
+    void client.invalidateQueries({ queryKey: queryKeys.flags(project?.id ?? "none") });
+  };
+  return {
+    create: useMutation({
+      mutationFn: (input: { name: string; key: string }) => createEnvironment(project!, input),
+      onSuccess: (_, input) => toast(`${input.name} created`, { detail: "Every flag starts off here." }),
+      onSettled: refresh,
+    }),
+    remove: useMutation({
+      mutationFn: (input: { id: string; name: string }) => deleteEnvironment(project!, input.id),
+      onSuccess: (_, input) => toast(`${input.name} deleted`, { detail: "Its flag settings and API keys are gone.", tone: "danger" }),
+      onError: (error) => toast("Could not delete the environment", { detail: error.message, tone: "danger" }),
       onSettled: refresh,
     }),
   };

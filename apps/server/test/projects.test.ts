@@ -118,6 +118,23 @@ describe("environments", () => {
     expect((await api.deleteEnv(admin, wsId, projectId, env.id)).status).toBe(204);
     expect((await api.deleteEnv(admin, wsId, projectId, env.id)).status).toBe(404);
   });
+
+  it("refuses to delete the last environment of a project, but allows it once another exists", async () => {
+    const envs = (await api.listEnvs(owner, wsId, projectId)).body.environments as { id: string }[];
+    for (const e of envs.slice(1)) expect((await api.deleteEnv(owner, wsId, projectId, e.id)).status).toBe(204);
+
+    const last = await api.deleteEnv(owner, wsId, projectId, envs[0]!.id);
+    expect(last.status).toBe(409);
+    expect(last.body.error.code).toBe("LAST_ENVIRONMENT");
+    expect((await api.listEnvs(owner, wsId, projectId)).body.environments).toHaveLength(1);
+
+    // An environment that does not exist is still a 404, not a "last environment" error.
+    expect((await api.deleteEnv(owner, wsId, projectId, "nope")).status).toBe(404);
+
+    // With a second environment the first can go.
+    await api.createEnv(owner, wsId, projectId, { name: "QA", key: "qa" });
+    expect((await api.deleteEnv(owner, wsId, projectId, envs[0]!.id)).status).toBe(204);
+  });
 });
 
 describe("tenant isolation", () => {
