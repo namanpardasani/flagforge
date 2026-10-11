@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchActivity, fetchFlags, fetchProjects, fetchWorkspaces } from "@/api/endpoints";
+import { fetchActivity, fetchApiKeys, fetchFlags, fetchProjects, fetchWorkspaces } from "@/api/endpoints";
 import { useSession } from "@/api/session";
 import { can, type Project, type Role } from "@/api/types";
 import { useLiveStatus } from "@/stores/live";
@@ -18,6 +18,7 @@ export const queryKeys = {
   projects: (workspaceId: string) => ["projects", workspaceId] as const,
   flags: (projectId: string) => ["flags", projectId] as const,
   activity: (projectId: string) => ["activity", projectId] as const,
+  apiKeys: (environmentId: string) => ["api-keys", environmentId] as const,
 };
 
 /** How often to refetch flags while the live stream is not delivering. */
@@ -53,3 +54,11 @@ export function useActivity(project: Project | undefined, role: Role | undefined
     enabled: project !== undefined && can.readAuditLog(role),
   });
 }
+
+/** Keys of one environment. Admin-only on the server, so for other roles the request is not sent. */
+export const useApiKeys = (project: Project | undefined, environmentId: string | undefined, role: Role | undefined) =>
+  useQuery({
+    queryKey: queryKeys.apiKeys(environmentId ?? "none"),
+    queryFn: () => fetchApiKeys(project!, environmentId!),
+    enabled: project !== undefined && environmentId !== undefined && can.manageKeys(role),
+  });

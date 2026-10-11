@@ -3,6 +3,7 @@ import { FigCaption } from "@/components/blueprint/marks";
 import { ALL_NAV_ITEMS } from "@/components/shell/nav";
 import { paths, useScope } from "@/components/shell/use-scope";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ApiKeysPage } from "./ApiKeys";
 import { FlagsPage } from "./Flags";
 import { OverviewPage } from "./Overview";
 
@@ -11,6 +12,7 @@ export function ProjectPage() {
   const { page } = useParams();
   if (page === "overview") return <OverviewPage />;
   if (page === "flags") return <FlagsPage />;
+  if (page === "api-keys") return <ApiKeysPage />;
 
   const item = ALL_NAV_ITEMS.find((i) => i.page === page);
   return item ? <NotBuiltYet label={item.label} /> : <NotFound />;

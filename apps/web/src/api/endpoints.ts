@@ -1,6 +1,6 @@
-import { auditSchema, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
+import { apiKeysSchema, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
 import { request } from "./client";
-import type { Activity, Flag, Project, Targeting, Workspace } from "./types";
+import type { Activity, ApiKey, Flag, Project, Targeting, Workspace } from "./types";
 
 /** One function per server route the dashboard uses. Each returns the app's own types. */
 
@@ -42,3 +42,17 @@ export const saveTargeting = async (project: Project, flagId: string, env: strin
 /** The audit log is workspace-wide and admin-only on the server. Callers pass the project's flags to keep only its entries. */
 export const fetchActivity = async (project: Project, flags: readonly Flag[]): Promise<Activity[]> =>
   toActivity((await request("GET", `/workspaces/${project.workspaceId}/audit-log?limit=100`, { schema: auditSchema })).entries, project, flags);
+
+const keysPath = (project: Project, environmentId: string) => `/workspaces/${project.workspaceId}/projects/${project.id}/environments/${environmentId}/api-keys`;
+
+export const fetchApiKeys = async (project: Project, environmentId: string): Promise<ApiKey[]> =>
+  (await request("GET", keysPath(project, environmentId), { schema: apiKeysSchema })).apiKeys.map(toApiKey);
+
+/** Returns the new key AND its one-time secret. */
+export const createApiKey = async (project: Project, environmentId: string, name: string): Promise<{ apiKey: ApiKey; secret: string }> => {
+  const created = await request("POST", keysPath(project, environmentId), { body: { name }, schema: createdApiKeySchema });
+  return { apiKey: toApiKey(created), secret: created.key };
+};
+
+export const revokeApiKey = (project: Project, environmentId: string, apiKeyId: string): Promise<void> =>
+  request("DELETE", `${keysPath(project, environmentId)}/${apiKeyId}`);

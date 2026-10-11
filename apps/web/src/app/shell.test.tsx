@@ -230,8 +230,8 @@ describe("flag list basics", () => {
 
 describe("pages not built yet", () => {
   it("explain themselves instead of looking broken", async () => {
-    await renderApp("/w/halden/p/dispatch-api/api-keys");
-    expect(await screen.findByRole("heading", { level: 2, name: "API keys is not wired up yet" })).toBeInTheDocument();
+    await renderApp("/w/halden/p/dispatch-api/members");
+    expect(await screen.findByRole("heading", { level: 2, name: "Members is not wired up yet" })).toBeInTheDocument();
   });
 });
 

@@ -1,6 +1,6 @@
 import type { Condition, Operator } from "@flagforge/core";
 import { z } from "zod";
-import { rememberEnvironments, type Activity, type Environment, type Flag, type FlagState, type Project, type TargetingRule, type User, type Workspace } from "./types";
+import { rememberEnvironments, type ApiKey, type Activity, type Environment, type Flag, type FlagState, type Project, type TargetingRule, type User, type Workspace } from "./types";
 
 /**
  * What the server sends (checked with Zod as it arrives) and how it becomes what the screens use.
@@ -176,3 +176,9 @@ export function toActivity(entries: z.infer<typeof auditSchema>["entries"], proj
   }
   return result;
 }
+
+const apiKeySchema = z.object({ id: z.string(), name: z.string(), prefix: z.string(), createdAt: z.string(), revokedAt: z.string().nullable() });
+export const apiKeysSchema = z.object({ apiKeys: z.array(apiKeySchema) });
+/** Only a brand-new key carries the full secret; the server never returns it again. */
+export const createdApiKeySchema = apiKeySchema.extend({ key: z.string() });
+export const toApiKey = (key: z.infer<typeof apiKeySchema>): ApiKey => ({ id: key.id, name: key.name, prefix: key.prefix, createdAt: key.createdAt, revokedAt: key.revokedAt });

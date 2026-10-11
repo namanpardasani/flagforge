@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { fromRule } from "@/api/adapters";
-import { createFlag, createProject, createWorkspace, fetchFlags, saveTargeting, setFlagEnabled } from "@/api/endpoints";
+import { createApiKey, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
 import { connectProjectStream } from "@/api/stream";
 import { envName, stateOf, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
 import { flash, type FlashKind } from "@/stores/flash";
@@ -117,6 +117,27 @@ export function useCreateWorkspace() {
       return { workspace, project };
     },
     onSettled: () => client.invalidateQueries({ queryKey: queryKeys.workspaces }),
+  });
+}
+
+// ---- API keys ------------------------------------------------------------------------------------
+
+export function useCreateApiKey(project: Project | undefined, environmentId: string | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => createApiKey(project!, environmentId!, name),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.apiKeys(environmentId ?? "none") }),
+  });
+}
+
+/** Not optimistic: revoking is a security action, so the row only changes once the server confirms. */
+export function useRevokeApiKey(project: Project | undefined, environmentId: string | undefined) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (apiKeyId: string) => revokeApiKey(project!, environmentId!, apiKeyId),
+    onSuccess: () => toast("Key revoked", { detail: "SDKs using it stop working immediately.", tone: "danger" }),
+    onError: (error) => toast("Could not revoke the key", { detail: error.message, tone: "danger" }),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.apiKeys(environmentId ?? "none") }),
   });
 }
 

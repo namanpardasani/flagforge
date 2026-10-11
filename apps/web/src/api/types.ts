@@ -91,6 +91,15 @@ export interface Activity {
   detail: string;
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  /** The first characters of the key, enough to recognise it. The rest is never stored. */
+  prefix: string;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
 export type Targeting = Pick<FlagState, "rolloutPercentage" | "rules">;
 
 const OFF: FlagState = { enabled: false, rolloutPercentage: 100, rules: [] };
@@ -113,6 +122,7 @@ export const can = {
   editFlags: (role: Role | undefined) => hasRole(role, "MEMBER"),
   readAuditLog: (role: Role | undefined) => hasRole(role, "ADMIN"),
   createProjects: (role: Role | undefined) => hasRole(role, "ADMIN"),
+  manageKeys: (role: Role | undefined) => hasRole(role, "ADMIN"),
 };
 
 // Environment names for display. Filled in as projects load (see adapters.ts), so a component can

@@ -122,6 +122,7 @@ export function createFakeServer() {
   let remoteTurn = 0;
   let calls: Array<{ method: string; path: string; authorization: string | null }> = [];
   let inFlight = 0;
+  let apiKeys: Array<{ id: string; environmentId: string; name: string; prefix: string; createdAt: string; revokedAt: string | null }> = [];
 
   const token = (kind: string) => `${kind}_${++sequence}_${Math.random().toString(36).slice(2, 8)}`;
   const now = () => new Date().toISOString();
@@ -129,6 +130,7 @@ export function createFakeServer() {
   function reset() {
     for (const stream of [...streams]) stream.close();
     flags = FLAGS.map(wireFlag);
+    apiKeys = [{ id: "key_seed", environmentId: envId("pr_dispatch", "prod"), name: "Checkout service", prefix: "ff_Qm2xK8v", createdAt: "2026-10-08T09:02:00Z", revokedAt: null }];
     audit = seedAudit();
     roles = Object.fromEntries(WORKSPACES.map((w) => [w.id, w.role]));
     versions = new Map(PROJECTS.flatMap((p) => ENVS.map((e) => [envId(p.id, e.key), 1] as const)));
@@ -263,6 +265,29 @@ export function createFakeServer() {
     const proj = inProject ? PROJECTS.find((p) => p.id === inProject[1] && p.workspaceSlug === ws.slug) : undefined;
     if (!inProject || !proj) return fail(404, "PROJECT_NOT_FOUND", "Project not found");
     const tail = inProject[2] ?? "";
+
+    const keysRoute = /^\/environments\/([^/]+)\/api-keys(?:\/([^/]+))?$/.exec(tail);
+    if (keysRoute) {
+      const denied = need("ADMIN");
+      if (denied) return denied;
+      const environment = ENVS.find((e) => envId(proj.id, e.key) === keysRoute[1]);
+      if (!environment) return fail(404, "ENVIRONMENT_NOT_FOUND", "Environment not found");
+      const environmentId = keysRoute[1]!;
+      const publicKey = ({ environmentId: _env, ...rest }: (typeof apiKeys)[number]) => rest;
+      if (method === "GET") return json(200, { apiKeys: apiKeys.filter((k) => k.environmentId === environmentId).map(publicKey) });
+      if (method === "POST") {
+        const secret = `ff_${token("secret")}${"x".repeat(24)}`; // the real key is "ff_" plus 48 characters
+        const created = { id: `key_${++sequence}`, environmentId, name: String(body?.["name"]), prefix: secret.slice(0, 10), createdAt: now(), revokedAt: null };
+        apiKeys = [...apiKeys, created];
+        return json(201, { ...publicKey(created), key: secret });
+      }
+      if (method === "DELETE") {
+        const key = apiKeys.find((k) => k.id === keysRoute[2] && k.environmentId === environmentId && !k.revokedAt);
+        if (!key) return fail(404, "API_KEY_NOT_FOUND", "API key not found");
+        key.revokedAt = now();
+        return new Response(null, { status: 204 });
+      }
+    }
 
     if (tail === "/stream" && method === "GET") return openStream(proj.id, signal);
     if (tail === "/flags" && method === "GET") return json(200, { flags: flags.filter((f) => f.projectId === proj.id) });
