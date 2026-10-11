@@ -36,12 +36,13 @@ if (flags.isEnabled("new-checkout", { key: user.id, attributes: { plan: user.pla
 
 ## API
 
-- `new FlagForgeClient({ apiKey, baseUrl, streaming?, pollIntervalMs?, streamPollIntervalMs?, streamIdleTimeoutMs?, requestTimeoutMs?, maxBackoffMs?, storage?, bootstrap?, allowInsecureHttp? })` (`streaming` defaults to true)
+- `new FlagForgeClient({ apiKey, baseUrl, sendEvents?, eventsFlushIntervalMs?, maxQueuedEvents?, streaming?, pollIntervalMs?, streamPollIntervalMs?, streamIdleTimeoutMs?, requestTimeoutMs?, maxBackoffMs?, storage?, bootstrap?, allowInsecureHttp? })` (`streaming` defaults to true)
 - `await client.init()` -> `{ ready, source: "network" | "storage" | "bootstrap" | "none" }`
 - `client.isEnabled(flagKey, user, defaultValue = false)` -> `boolean`
 - `client.evaluate(flagKey, user, defaultValue = false)` -> `{ value, reason, ruleId? }`
   (`reason`: `OFF`, `RULE_MATCH`, `FALLTHROUGH`, `FLAG_NOT_FOUND`, `NOT_READY`, `ERROR`)
 - `client.allFlags(user)`, `client.refresh()`, `client.close()`
+- `client.track(metricKey, user)` and `client.flush()`: experiment events, see below
 - `client.status` -> `{ ready, source, stream: "off" | "connecting" | "connected" | "disconnected", version?, consecutiveFailures, lastSuccessAt?, fatal }`
 - `client.on("ready" | "update" | "error", listener)` returns an unsubscribe function
 
@@ -54,3 +55,36 @@ if (flags.isEnabled("new-checkout", { key: user.id, attributes: { plan: user.pla
 - Plain `http://` is refused for non-local hosts, so the key is not sent in clear text.
 - Error messages never include the API key or request URL.
 - `FileStorage` writes with mode `0600` because the cache contains your targeting rules.
+
+
+## Experiments
+
+An experiment compares users who got a flag with users who did not. For that, FlagForge needs to
+know who was shown which variant, and who did the thing you are measuring. Turn reporting on:
+
+```ts
+const flags = new FlagForgeClient({ apiKey, baseUrl, sendEvents: true });
+await flags.init();
+
+// Checking a flag records that this user was shown the result (once per user per flag).
+if (flags.isEnabled("one-tap-checkout", { key: user.id })) showOneTap();
+
+// Later, when the user does what the experiment measures:
+flags.track("checkout-completed", { key: user.id });
+```
+
+How it behaves:
+
+- **Off by default.** With `sendEvents` off, no user key ever leaves your server.
+- **A flag check never waits for the network.** Events go into an in-memory queue and are sent in
+  batches of up to 500, every 5 seconds (`eventsFlushIntervalMs`).
+- **Failures are retried; memory is bounded.** If FlagForge cannot be reached, events stay queued
+  and are retried. The queue holds at most `maxQueuedEvents` (10,000); beyond that the OLDEST are
+  dropped. `client.status.events` shows `queued`, `sent` and `dropped`.
+- **Only real decisions count.** A default returned because the SDK is not ready, or because the
+  flag does not exist, is not an exposure. `allFlags` does not record exposures either: listing
+  every flag is not the same as showing each one to the user.
+- **A rejected key stops reporting** and raises one fatal `error` event; flag evaluation carries on.
+- **In a short-lived process** (a script, a serverless function), `await flags.flush()` before
+  exiting, or events still in the queue are lost.
+- FlagForge stores only a hash of each user key, specific to the experiment, never the key itself.

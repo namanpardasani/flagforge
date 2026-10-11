@@ -21,6 +21,10 @@ export class StubServer {
   // ---- real-time stream (GET /sdk/v1/stream) ----
   /** Open SSE connections. */
   streams: ServerResponse[] = [];
+  /** Bodies received at POST /sdk/v1/events, parsed. */
+  eventBatches: { events: Array<Record<string, unknown>> }[] = [];
+  /** Status to answer event batches with. */
+  eventsStatus = 202;
   /** Non-200 makes the stream endpoint refuse connections. */
   streamStatus = 200;
   /** Version sent in the hello event. Defaults to the snapshot's version. */
@@ -45,6 +49,15 @@ export class StubServer {
     const server = createServer((req, res) => {
       this.requests.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers });
       if (req.url === "/sdk/v1/stream") return this.#openStream(res);
+      if (req.url === "/sdk/v1/events") {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          if (this.eventsStatus < 300) this.eventBatches.push(JSON.parse(body));
+          res.writeHead(this.eventsStatus, { "content-type": "application/json" }).end("{}");
+        });
+        return;
+      }
       const respond = () => {
         if (this.status !== 200) {
           res.writeHead(this.status, { "content-type": "text/plain" }).end("error");
@@ -69,6 +82,15 @@ export class StubServer {
 
   get flagRequests() {
     return this.requests.filter((r) => r.url === "/sdk/v1/flags");
+  }
+
+  get eventRequests() {
+    return this.requests.filter((r) => r.url === "/sdk/v1/events");
+  }
+
+  /** Every event received so far, across batches. */
+  get events() {
+    return this.eventBatches.flatMap((b) => b.events);
   }
 
   get streamRequests() {

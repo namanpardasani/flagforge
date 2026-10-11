@@ -1,4 +1,5 @@
 import { evaluateFlag, type EvaluationContext, type FlagConfig } from "@flagforge/core";
+import { EventReporter } from "./events.js";
 import { parseSnapshot } from "./parse.js";
 import { SseParser } from "./sse.js";
 import {
@@ -41,6 +42,8 @@ export class FlagForgeClient {
   #abort: AbortController | undefined;
   #initPromise: Promise<{ ready: boolean; source: ConfigSource }> | undefined;
 
+  readonly #events: EventReporter | undefined;
+
   #streamState: StreamState;
   #streamDegraded = false;
   #streamAbort: AbortController | undefined;
@@ -78,6 +81,17 @@ export class FlagForgeClient {
     this.#streamState = this.#streaming ? "connecting" : "off";
     this.#options = options;
     this.#fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
+    if (options.sendEvents) {
+      this.#events = new EventReporter({
+        apiKey: this.#apiKey,
+        baseUrl: this.#baseUrl,
+        fetch: this.#fetch,
+        flushIntervalMs: options.eventsFlushIntervalMs ?? 5_000,
+        requestTimeoutMs: this.#requestTimeoutMs,
+        maxQueue: options.maxQueuedEvents ?? 10_000,
+        onError: (error) => this.#emit("error", error),
+      });
+    }
   }
 
   // ---- events -------------------------------------------------------------------------------
@@ -428,6 +442,7 @@ export class FlagForgeClient {
   /** Stops polling and the stream, and cancels requests in flight. Evaluation keeps working with the last config. */
   close(): void {
     this.#closed = true;
+    void this.#events?.close(); // one last attempt to send queued events; never awaited here
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = undefined;
     this.#abort?.abort();
@@ -446,6 +461,7 @@ export class FlagForgeClient {
       streamDegraded: this.#streamDegraded,
       ...(this.#version !== undefined ? { version: this.#version } : {}),
       fatal: this.#fatal,
+      events: this.#events?.stats ?? { queued: 0, sent: 0, dropped: 0 },
     };
   }
 
@@ -462,7 +478,10 @@ export class FlagForgeClient {
     const config = this.#flags.get(flagKey);
     if (!config) return { value: defaultValue, reason: "FLAG_NOT_FOUND" };
     try {
-      return evaluateFlag(config, user);
+      const result = evaluateFlag(config, user);
+      // Only a real decision is an exposure: defaults returned above (not ready, unknown flag) are not.
+      this.#events?.exposure(flagKey, user.key, result.value);
+      return result;
     } catch {
       return { value: defaultValue, reason: "ERROR" };
     }
@@ -472,10 +491,37 @@ export class FlagForgeClient {
     return this.evaluate(flagKey, user, defaultValue).value;
   }
 
-  /** Every flag's decision for one user, e.g. to hand to a front end. */
+  /**
+   * Every flag's decision for one user, e.g. to hand to a front end.
+   * Does NOT record exposures: listing every flag is not the same as the user being shown each
+   * one. Call `evaluate` or `isEnabled` for the flag a user actually experiences.
+   */
   allFlags(user: EvaluationContext): Record<string, EvaluationDetail> {
     const out: Record<string, EvaluationDetail> = {};
-    for (const key of this.#flags.keys()) out[key] = this.evaluate(key, user);
+    for (const [key, config] of this.#flags) {
+      try {
+        out[key] = this.#ready && user && typeof user.key === "string" && user.key !== "" ? evaluateFlag(config, user) : this.evaluate(key, user);
+      } catch {
+        out[key] = { value: false, reason: "ERROR" };
+      }
+    }
     return out;
+  }
+
+  // ---- experiment events (only when `sendEvents` is on) -----------------------------------------
+
+  /**
+   * Records that a user did the thing an experiment measures, e.g. `track("checkout-completed", user)`.
+   * Returns immediately; events are sent in batches in the background. Does nothing unless the
+   * client was created with `sendEvents: true`. Never throws.
+   */
+  track(metricKey: string, user: EvaluationContext): void {
+    if (typeof metricKey !== "string" || metricKey === "" || !user || typeof user.key !== "string" || user.key === "") return;
+    this.#events?.conversion(metricKey, user.key);
+  }
+
+  /** Sends queued events now. Await it before a short-lived process exits. Never rejects. */
+  flush(): Promise<void> {
+    return this.#events?.flush() ?? Promise.resolve();
   }
 }

@@ -49,6 +49,16 @@ export interface FlagForgeOptions {
   streamPollIntervalMs?: number;
   /** Reconnect if the stream is silent this long (the server sends heartbeats about every 25s). Default 60000. */
   streamIdleTimeoutMs?: number;
+  /**
+   * Report experiment events to FlagForge: which users were shown which variant (from `evaluate`
+   * and `isEnabled`), and conversions you record with `track`. Off by default: with it off, no
+   * user key ever leaves your server. Needed for experiments to collect data.
+   */
+  sendEvents?: boolean;
+  /** How often queued events are sent. Default 5000. */
+  eventsFlushIntervalMs?: number;
+  /** Most events held in memory while waiting to be sent; the oldest are dropped beyond this. Default 10000. */
+  maxQueuedEvents?: number;
 }
 
 /** Why a value was returned. The first three come from @flagforge/core; the rest are SDK fallbacks. */
@@ -81,6 +91,8 @@ export interface ClientStatus {
   version?: number;
   /** True after a 401/403: polling has stopped until you create a new client. */
   fatal: boolean;
+  /** Experiment events: waiting to be sent, sent so far, and dropped (queue full or refused). All zero when `sendEvents` is off. */
+  events: { queued: number; sent: number; dropped: number };
 }
 
 export type ClientEvents = {
