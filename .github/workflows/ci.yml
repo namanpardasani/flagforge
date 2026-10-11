@@ -77,6 +77,7 @@ jobs:
           pnpm exec prisma migrate deploy
           pnpm exec tsc --noEmit
           pnpm exec vitest run
+          node build.mjs
 
       - name: web
         working-directory: apps/web

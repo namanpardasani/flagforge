@@ -1,0 +1,34 @@
+# Render "blueprint" for the API server. In Render: New > Blueprint > pick this repository.
+# Not yet tested against a real deploy; see DEPLOY.md for the steps and what to check.
+services:
+  - type: web
+    name: flagforge-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      cd apps/server &&
+      pnpm exec prisma generate &&
+      node build.mjs
+    # Migrations run before the server starts, so a deploy never serves requests against an old schema.
+    startCommand: cd apps/server && pnpm exec prisma migrate deploy && node --enable-source-maps dist/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      # Render puts one proxy in front of the service. Rate limits need this to see real client IPs.
+      - key: TRUST_PROXY
+        value: "1"
+      - key: JWT_ACCESS_SECRET
+        generateValue: true # Render creates a long random value; it never appears in this file
+      # Filled in by hand in the Render dashboard (they are secrets or depend on other services):
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

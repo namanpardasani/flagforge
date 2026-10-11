@@ -51,7 +51,18 @@ export function createApp({ logger, config, prisma, checkDatabase, redis, realti
 
   app.use(requestLogger(logger));
   app.use(helmet());
-  app.use(cors());
+  // Which websites may call this API from a browser. Server-to-server callers (the SDK) are not
+  // affected: CORS is enforced by browsers only. It is not an access control by itself (every route
+  // still needs a token or an API key); it stops other sites from using a visitor's browser to call us.
+  const allowAnyOrigin = config.CORS_ORIGINS.length === 0 && config.NODE_ENV !== "production";
+  app.use(
+    cors({
+      origin: allowAnyOrigin ? true : config.CORS_ORIGINS,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      allowedHeaders: ["Authorization", "Content-Type", "Accept"],
+      maxAge: 600, // browsers may cache the preflight answer for ten minutes
+    }),
+  );
 
   // Per-IP limit for the management API. /sdk has its own per-key limits (a whole fleet can share one
   // IP), and /health must always answer for load balancers.

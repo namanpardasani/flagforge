@@ -22,6 +22,28 @@ const envSchema = z.object({
     .optional(),
   // How many reverse proxies sit in front (Render, nginx...). Needed so rate limits see the real client IP.
   TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
+  /**
+   * Browser origins allowed to call the API, comma separated (e.g. "https://app.example.com").
+   * Unset: any origin in development, NONE in production. A deployed API must name its frontend,
+   * so a forgotten setting fails closed instead of leaving the API open to every website.
+   */
+  CORS_ORIGINS: z
+    .string()
+    .optional()
+    .transform((value) => (value ?? "").split(",").map((origin) => origin.trim()).filter(Boolean))
+    .pipe(
+      z.array(
+        z.string().refine((origin) => {
+          try {
+            const url = new URL(origin);
+            // An origin is scheme + host (+ port): no path, query or trailing slash.
+            return (url.protocol === "https:" || url.protocol === "http:") && url.origin === origin;
+          } catch {
+            return false;
+          }
+        }, "CORS_ORIGINS entries must be origins like https://app.example.com (no path, no trailing slash)"),
+      ),
+    ),
   RATE_LIMIT_ENABLED: z
     .enum(["true", "false"])
     .default("true")
