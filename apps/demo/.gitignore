@@ -1,0 +1,2 @@
+# The SDK's on-disk copy of the flags (created when the demo runs).
+.flagforge-cache.json
