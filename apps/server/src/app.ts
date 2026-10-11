@@ -20,6 +20,8 @@ import { apiKeysRouter } from "./routes/api-keys.js";
 import { authRouter } from "./routes/auth.js";
 import { experimentsRouter } from "./routes/experiments.js";
 import { flagsRouter } from "./routes/flags.js";
+import { scheduleRouter } from "./routes/schedule.js";
+import { createScheduleService, type ScheduleService } from "./schedule/service.js";
 import { healthRouter, type DatabaseCheck } from "./routes/health.js";
 import { projectsRouter } from "./routes/projects.js";
 import { sdkRouter } from "./routes/sdk.js";
@@ -84,7 +86,11 @@ export function createApp({ logger, config, prisma, checkDatabase, redis, realti
   app.use(authRouter(createAuthService(prisma, config, { mailer: mailer ?? createMailer(config, logger), logger }), config, services.rateLimiter, limits));
   app.use(workspacesRouter(createWorkspaceService(prisma), prisma, config));
   app.use(projectsRouter(createProjectService(prisma, services.keyCache), prisma, config, rt.dashboard));
-  app.use(flagsRouter(createFlagService(prisma, { bus: rt.bus, cache: services.configCache }), prisma, config));
+  const flagService = createFlagService(prisma, { bus: rt.bus, cache: services.configCache });
+  app.use(flagsRouter(flagService, prisma, config));
+  const scheduled = createScheduleService(prisma, flagService, logger);
+  app.use(scheduleRouter(scheduled, prisma, config));
+  app.locals["scheduled"] = scheduled; // so the process that starts the server can run the scheduler
   app.use(apiKeysRouter(createApiKeyService(prisma, rt.bus, services.keyCache), prisma, config));
   const experiments = createExperimentService(prisma);
   app.use(experimentsRouter(experiments, prisma, config));
@@ -105,3 +111,6 @@ export function createApp({ logger, config, prisma, checkDatabase, redis, realti
 
   return app;
 }
+
+/** The scheduled-changes service of an app made by createApp (server.ts starts its runner). */
+export const scheduledChangesOf = (app: ReturnType<typeof createApp>) => app.locals["scheduled"] as ScheduleService;

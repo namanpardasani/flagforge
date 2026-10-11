@@ -1,7 +1,8 @@
 import { pino } from "pino";
-import { createApp } from "./app.js";
+import { createApp, scheduledChangesOf } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createRealtime } from "./realtime/index.js";
+import { startScheduler } from "./schedule/service.js";
 import { createRedisServices } from "./redis/index.js";
 
 const config = loadConfig();
@@ -26,6 +27,10 @@ const app = createApp({
   },
 });
 
+// Applies planned flag changes when they fall due, and catches up on any that fell due while this
+// process was asleep or restarting.
+const scheduler = startScheduler(scheduledChangesOf(app), logger);
+
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT }, "server listening");
 });
@@ -33,6 +38,7 @@ const server = app.listen(config.PORT, () => {
 function shutdown(signal: string) {
   logger.info({ signal }, "shutting down");
   server.close(async () => {
+    await scheduler.stop();
     await realtime.close();
     await redis.close();
     await prisma.$disconnect();
