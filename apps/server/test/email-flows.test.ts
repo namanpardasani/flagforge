@@ -110,8 +110,7 @@ describe("email verification", () => {
 
   it("resend needs a signed-in user, and for a confirmed user sends nothing", async () => {
     expect((await request(app).post("/auth/resend-verification")).status).toBe(401);
-    const user = await registerUser(app, "ready@example.com"); // confirmed by the helper
-    testMailer.sent.length = 0;
+    const user = await registered("ready@example.com"); // confirmed, mailbox emptied
     expect((await request(app).post("/auth/resend-verification").set("Authorization", user.auth)).body).toEqual({ alreadyVerified: true });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(testMailer.sent).toHaveLength(0);
