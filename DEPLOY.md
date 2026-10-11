@@ -23,6 +23,19 @@ Keep it for step 3. Do not commit it anywhere.
 Without Redis the API still works: no config cache, and rate limits and live events are
 per-instance. With one free instance that is acceptable; Redis matters once there are two.
 
+## 2b. Email: Brevo (needed: the API will not start in production without it)
+
+Accounts use emailed links to confirm an address and to reset a password. Brevo's free plan sends
+300 emails a day to any address, and needs no domain:
+
+1. Create an account at brevo.com.
+2. **Senders, domains and dedicated IPs > Senders > Add a sender**: use an address you control
+   (a Gmail address is fine). Brevo emails it a confirmation link; open it.
+3. **SMTP and API > API keys > Generate a new API key** (the v3 API key, not the SMTP password). Copy it.
+
+Keep the key for step 3. (Resend also works, with `MAIL_PROVIDER=resend`, but it only delivers to
+addresses on a domain you have verified, so it is no use without a domain of your own.)
+
 ## 3. API: Render
 
 1. Render dashboard > **New > Blueprint** > select this repository. It reads `render.yaml`.
@@ -30,6 +43,9 @@ per-instance. With one free instance that is acceptable; Redis matters once ther
    - `DATABASE_URL`: the Neon string from step 1
    - `REDIS_URL`: the Upstash URL from step 2 (or leave empty)
    - `CORS_ORIGINS`: leave empty for now; you set it in step 5
+   - `APP_URL`: leave empty for now; you set it in step 5 (it is the dashboard's address)
+   - `MAIL_API_KEY`: the Brevo key from step 2b
+   - `MAIL_FROM`: the sender you verified, e.g. `FlagForge <you@gmail.com>`
 3. Deploy. The start command runs the database migrations, then starts the server.
 4. Check `https://YOUR-SERVICE.onrender.com/health`. Expect
    `{"status":"ok","database":"up","redis":"up"}` (or `"redis":"disabled"`).
@@ -46,13 +62,15 @@ per-instance. With one free instance that is acceptable; Redis matters once ther
 
 ## 5. Let the dashboard call the API
 
-In Render, set `CORS_ORIGINS` to the Vercel address from step 4, exactly, with no trailing slash:
+In Render, set **both** of these to the Vercel address from step 4, exactly, with no trailing slash:
 
 ```
-https://flagforge.vercel.app
+CORS_ORIGINS=https://flagforge.vercel.app
+APP_URL=https://flagforge.vercel.app
 ```
 
-Several origins can be listed, separated by commas. Save; Render redeploys.
+`CORS_ORIGINS` may list several origins, separated by commas. `APP_URL` is the one address that
+emailed links point to. Save; Render redeploys.
 
 **Until this is set, the browser will refuse every request from the dashboard.** In production the
 API allows no origin by default, on purpose: a forgotten setting fails closed.
@@ -62,7 +80,9 @@ API allows no origin by default, on purpose: a forgotten setting fails closed.
 1. Open the Vercel address, create an account, create a workspace, project and flag.
 2. Open the Flags page in two windows and flip a flag in one. The other should flash within a
    second or two.
-3. Create an API key and run the demo against the hosted API:
+3. Check the emails: register a second account with an address you can read. A confirmation email
+   should arrive within a minute (look in spam the first time). Then try "Forgot your password?".
+4. Create an API key and run the demo against the hosted API:
 
    ```bash
    cd apps/demo
@@ -74,6 +94,10 @@ API allows no origin by default, on purpose: a forgotten setting fails closed.
 - **Render sleeps after 15 minutes without traffic** and takes about 15 seconds or more to wake.
   Open streams drop when it sleeps; the dashboard and the SDK reconnect and resync by themselves
   when it wakes. Warm it up (open `/health`) before a demo.
+- **Scheduled rollouts only run while the API is awake.** A change due at 9:00 runs when the server
+  next wakes, which may be later. A free uptime monitor (for example UptimeRobot) that opens
+  `https://YOUR-SERVICE.onrender.com/health` every 5 minutes keeps it awake, within the 750 free
+  hours a month for one service.
 - **Neon scales to zero after 5 minutes idle.** The first query afterwards is slow.
 - **Upstash allows 500K commands a month.** Do not point load tests at it; use local Redis.
 
@@ -83,4 +107,3 @@ The list of known gaps is under "Open items" in NOTES.md. The two that matter mo
 
 - The refresh token is kept in `localStorage`. An httpOnly cookie is stronger and needs a server
   change plus CSRF protection.
-- There is no email verification or password reset.

@@ -13,6 +13,8 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  /** False until they open the emailed link. Controls a reminder banner, nothing else: the server decides what an unconfirmed address may do. */
+  emailVerified: boolean;
 }
 
 export interface Environment {

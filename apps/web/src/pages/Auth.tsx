@@ -11,10 +11,10 @@ import { Field } from "@/components/ui/field";
 
 /** Where to go after signing in: back to the page that sent us here, if there was one. */
 function useReturnTo() {
-  const state = useLocation().state as { from?: unknown; expired?: unknown } | null;
+  const state = useLocation().state as { from?: unknown; expired?: unknown; passwordReset?: unknown } | null;
   // Only an in-app path is accepted, so a crafted link cannot bounce someone to another site.
   const from = typeof state?.from === "string" && state.from.startsWith("/") && !state.from.startsWith("//") ? state.from : paths.home;
-  return { from, expired: state?.expired === true };
+  return { from, expired: state?.expired === true, passwordReset: state?.passwordReset === true };
 }
 
 function explain(error: unknown): string {
@@ -27,7 +27,7 @@ function explain(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function AuthFrame({ fig, title, children, footer }: { fig: string; title: ReactNode; children: ReactNode; footer: ReactNode }) {
+export function AuthFrame({ fig, title, children, footer }: { fig: string; title: ReactNode; children: ReactNode; footer: ReactNode }) {
   return (
     <div className="flex min-h-dvh items-center justify-center bg-canvas px-4 py-12">
       <main className="w-full max-w-sm">
@@ -50,7 +50,7 @@ function AuthFrame({ fig, title, children, footer }: { fig: string; title: React
 export function LoginPage() {
   const session = useSession();
   const navigate = useNavigate();
-  const { from, expired } = useReturnTo();
+  const { from, expired, passwordReset } = useReturnTo();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -89,9 +89,19 @@ export function LoginPage() {
       }
     >
       {expired && !error && <p className="mt-3 text-sm text-muted">Your session ended. Sign in again to carry on where you were.</p>}
+      {passwordReset && !error && (
+        <p role="status" className="mt-3 text-sm text-muted">
+          Your password was changed and every session was signed out. Sign in with the new one.
+        </p>
+      )}
       <form onSubmit={submit} className="mt-5 space-y-4">
         <Field label="Email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
         <Field label="Password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <p className="text-right text-xs">
+          <Link to={paths.forgotPassword} state={{ email }} className="text-muted underline-offset-4 hover:text-ink hover:underline">
+            Forgot your password?
+          </Link>
+        </p>
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}

@@ -11,7 +11,7 @@ const OPERATORS = ["equals", "not_equals", "in", "not_in", "contains", "starts_w
 const LIST_OPERATORS: readonly Operator[] = ["in", "not_in"];
 const NUMBER_OPERATORS: readonly Operator[] = ["gt", "gte", "lt", "lte"];
 
-export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.string() });
+export const userSchema = z.object({ id: z.string(), name: z.string(), email: z.string(), emailVerified: z.boolean() });
 export const sessionSchema = z.object({ user: userSchema, accessToken: z.string(), refreshToken: z.string() });
 export const meSchema = z.object({ user: userSchema });
 
@@ -71,7 +71,7 @@ type AuditEntry = z.infer<typeof auditEntrySchema>;
 type ServerRule = z.infer<typeof ruleSchema>;
 type ServerFlag = z.infer<typeof flagSchema>;
 
-export const toUser = (user: z.infer<typeof userSchema>): User => ({ id: user.id, name: user.name, email: user.email });
+export const toUser = (user: z.infer<typeof userSchema>): User => ({ id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified });
 export const toWorkspace = (w: z.infer<typeof workspaceSchema>): Workspace => ({ id: w.id, name: w.name, slug: w.slug, role: w.role });
 
 export function toProject(project: z.infer<typeof projectSchema>): Project {

@@ -32,3 +32,13 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      # Email (verification and password reset). The API refuses to start in production without a
+      # real provider: the log sender would print secret links into the server log.
+      - key: APP_URL
+        sync: false # the dashboard's address, e.g. https://flagforge.vercel.app
+      - key: MAIL_PROVIDER
+        value: brevo
+      - key: MAIL_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false # e.g. FlagForge <you@example.com>, the sender address you verified with Brevo

@@ -8,3 +8,4 @@ export { WorkspaceIndex } from "@/pages/WorkspaceIndex";
 export { LoginPage, RegisterPage } from "@/pages/Auth";
 export { HomeRedirect, WelcomePage } from "@/pages/Welcome";
 export { ExperimentDetailPage } from "@/pages/ExperimentDetail";
+export { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from "@/pages/AccountRecovery";

@@ -21,6 +21,9 @@ export const routes: RouteObject[] = [
   { path: "/", hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).HomeRedirect }) },
   { path: paths.login, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).LoginPage }) },
   { path: paths.register, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).RegisterPage }) },
+  { path: paths.forgotPassword, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).ForgotPasswordPage }) },
+  { path: paths.resetPassword, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).ResetPasswordPage }) },
+  { path: paths.verifyEmail, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).VerifyEmailPage }) },
   { path: paths.welcome, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).WelcomePage }) },
   { path: "/w/:workspaceSlug", hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).WorkspaceIndex }) },
   {

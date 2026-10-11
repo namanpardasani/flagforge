@@ -107,6 +107,9 @@ function seedAudit(): AuditRow[] {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const fail = (status: number, code: string, message: string) => json(status, { error: { code, message, requestId: "req_test" } });
 
+/** Counts every emailed link ever made in this test run. Not reset between tests, so tokens stay unique. */
+let linkSequence = 0;
+
 export function createFakeServer() {
   let flags: WireFlag[] = [];
   let audit: AuditRow[] = [];
@@ -123,6 +126,9 @@ export function createFakeServer() {
   let remoteTurn = 0;
   let calls: Array<{ method: string; path: string; authorization: string | null }> = [];
   let inFlight = 0;
+  // Email flows: whether the signed-in user's address is confirmed, and the single-use links "emailed" so far.
+  let emailVerified = true;
+  let emailTokens = new Map<string, { kind: "verify" | "reset"; used: boolean; expired: boolean }>();
   interface FakeExperiment { id: string; projectId: string; environmentId: string; flagId: string; name: string; hypothesis: string | null; metricKey: string; status: "DRAFT" | "RUNNING" | "STOPPED"; startedAt: string | null; stoppedAt: string | null; createdAt: string; flag: { key: string; name: string }; environment: { key: string; name: string } }
   let experiments: FakeExperiment[] = [];
   let experimentCounts: Record<string, { control: { users: number; conversions: number }; treatment: { users: number; conversions: number } }> = {};
@@ -140,6 +146,9 @@ export function createFakeServer() {
     projectEnvs = Object.fromEntries(PROJECTS.map((p) => [p.id, ENVS.map((e) => ({ key: e.key, name: e.name }))]));
     for (const stream of [...streams]) stream.close();
     flags = FLAGS.map(wireFlag);
+    emailVerified = true;
+    emailTokens = new Map();
+    TEST_USER.password = "correct horse battery"; // a reset in one test must not change the next
     experiments = [];
     experimentCounts = {};
     members = [
@@ -171,7 +180,8 @@ export function createFakeServer() {
     return pair;
   };
 
-  const publicUser = { id: TEST_USER.id, name: TEST_USER.name, email: TEST_USER.email, createdAt: "2026-01-01T00:00:00.000Z" };
+  const publicUserNow = () => ({ id: TEST_USER.id, name: TEST_USER.name, email: TEST_USER.email, createdAt: "2026-01-01T00:00:00.000Z", emailVerified });
+  const publicUser = { get name() { return TEST_USER.name; } };
   const workspace = (w: (typeof WORKSPACES)[number]) => ({ id: w.id, name: w.name, slug: w.slug, ownerId: TEST_USER.id, createdAt: "2026-01-01T00:00:00.000Z", role: roles[w.id] });
   const project = (p: (typeof PROJECTS)[number]) => ({
     id: p.id,
@@ -236,11 +246,11 @@ export function createFakeServer() {
     // ---- sign-in routes (no token needed) ----
     if (path === "/auth/login" && method === "POST") {
       if (body?.["email"] !== TEST_USER.email || body["password"] !== TEST_USER.password) return fail(401, "INVALID_CREDENTIALS", "Invalid email or password");
-      return json(200, { user: publicUser, ...issue() });
+      return json(200, { user: publicUserNow(), ...issue() });
     }
     if (path === "/auth/register" && method === "POST") {
       if (body?.["email"] === TEST_USER.email) return fail(409, "EMAIL_TAKEN", "An account with this email already exists");
-      return json(201, { user: { ...publicUser, name: String(body?.["name"]), email: String(body?.["email"]) }, ...issue() });
+      return json(201, { user: { ...publicUserNow(), name: String(body?.["name"]), email: String(body?.["email"]), emailVerified: false }, ...issue() });
     }
     if (path === "/auth/refresh" && method === "POST") {
       const presented = String(body?.["refreshToken"]);
@@ -258,12 +268,40 @@ export function createFakeServer() {
       return new Response(null, { status: 204 });
     }
 
+    // ---- email confirmation and password reset (single-use links, like the real server) ----
+    const invalid = () => fail(400, "INVALID_TOKEN", "This link is invalid, has expired, or was already used");
+    const claim = (token: unknown, kind: "verify" | "reset") => {
+      const link = typeof token === "string" ? emailTokens.get(token) : undefined;
+      if (!link || link.kind !== kind || link.used || link.expired) return null;
+      link.used = true;
+      return link;
+    };
+    if (path === "/auth/verify-email" && method === "POST") {
+      if (!claim(body?.["token"], "verify")) return invalid();
+      emailVerified = true;
+      return json(200, { verified: true });
+    }
+    if (path === "/auth/forgot-password" && method === "POST") {
+      if (typeof body?.["email"] !== "string" || !body["email"].includes("@")) return fail(400, "VALIDATION_ERROR", "Invalid request");
+      return json(202, { message: "If an account exists for that address, a reset link is on its way." });
+    }
+    if (path === "/auth/reset-password" && method === "POST") {
+      const password = typeof body?.["password"] === "string" ? body["password"] : "";
+      if (password.length < 8) return fail(400, "VALIDATION_ERROR", "Password must be at least 8 characters");
+      if (!claim(body?.["token"], "reset")) return invalid();
+      TEST_USER.password = password;
+      emailVerified = true;
+      refreshTokens.clear(); // every session is signed out
+      return json(200, { reset: true });
+    }
+
     // ---- everything else needs a valid access token ----
     const presented = authorization?.replace(/^Bearer /, "") ?? "";
     const known = accessTokens.get(presented);
     if (!known || known.expired) return fail(401, "UNAUTHORIZED", "Invalid or expired access token");
 
-    if (path === "/auth/me") return json(200, { user: publicUser });
+    if (path === "/auth/resend-verification" && method === "POST") return json(200, { alreadyVerified: emailVerified });
+    if (path === "/auth/me") return json(200, { user: publicUserNow() });
     if (path === "/workspaces" && method === "GET") return json(200, { workspaces: WORKSPACES.filter((w) => roles[w.id]).map(workspace) });
 
     const match = /^\/workspaces\/([^/]+)(\/.*)?$/.exec(path);
@@ -608,6 +646,17 @@ export function createFakeServer() {
     /** What the server would have counted from SDK events. */
     setExperimentCounts(id: string, control: { users: number; conversions: number }, treatment: { users: number; conversions: number }) {
       experimentCounts[id] = { control, treatment };
+    },
+    /** The signed-in user has not confirmed their address (shows the reminder banner). */
+    setEmailVerified(value: boolean) {
+      emailVerified = value;
+    },
+    /** A link as it would arrive in an email. Returns the token that would be in its fragment. */
+    emailLink(kind: "verify" | "reset", options: { expired?: boolean } = {}) {
+      // Never repeats, even across tests: real tokens do not, and the app remembers the ones it has used.
+      const token = `${kind}-${++linkSequence}-${"x".repeat(30)}`;
+      emailTokens.set(token, { kind, used: false, expired: options.expired ?? false });
+      return token;
     },
     /** Pads the log with older entries, to exercise paging. */
     addOldAuditEntries(count: number) {

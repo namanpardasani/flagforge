@@ -64,6 +64,12 @@ async function enter(path: "/auth/login" | "/auth/register", body: object) {
 export const signIn = (input: { email: string; password: string }) => enter("/auth/login", input);
 export const register = (input: { name: string; email: string; password: string }) => enter("/auth/register", input);
 
+/** The address was confirmed in this browser: update the signed-in user so the banner goes away. */
+export function markEmailVerified() {
+  const current = store.get();
+  if (current.status === "signedIn") store.set({ status: "signedIn", user: { ...current.user, emailVerified: true } });
+}
+
 export async function signOut() {
   const refreshToken = tokens.refreshToken();
   tokens.clear();

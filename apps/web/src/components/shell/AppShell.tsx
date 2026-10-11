@@ -13,6 +13,7 @@ import { CommandPalette } from "./CommandPalette";
 import { RequireAuth } from "./RequireAuth";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { VerifyEmailBanner } from "./VerifyEmailBanner";
 import { paths, useScope } from "./use-scope";
 import { useShell } from "./use-shell";
 
@@ -86,6 +87,7 @@ function ShellFrame({ crumbs }: { crumbs?: readonly Crumb[] }) {
 
         <motion.div layout layoutDependency={collapsed} transition={spring.layout} className="min-w-0 flex-1">
           <motion.div layout="position" layoutDependency={collapsed} transition={spring.layout} className="relative flex h-dvh flex-col">
+            <VerifyEmailBanner />
             <TopBar crumbs={crumbs} />
             <motion.main id="main" layoutScroll tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto outline-none">
               <AnimatePresence mode="wait" initial={false}>
