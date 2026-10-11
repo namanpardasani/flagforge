@@ -133,6 +133,30 @@ export function memberActions(actor: { id: string; role: Role | undefined }, tar
   };
 }
 
+/** The part of a flag's state a schedule can change. Rules can be planned through the API; this form plans on/off and rollout. */
+export interface ScheduledChangePatch {
+  enabled?: boolean;
+  rolloutPercentage?: number;
+  rules?: unknown[];
+}
+
+export type ScheduledChangeStatus = "PENDING" | "RUNNING" | "APPLIED" | "CANCELLED" | "FAILED";
+
+export interface ScheduledChange {
+  id: string;
+  flagId: string;
+  flagKey: string;
+  environmentKey: EnvKey;
+  environmentName: string;
+  runAt: string;
+  patch: ScheduledChangePatch;
+  status: ScheduledChangeStatus;
+  appliedAt: string | null;
+  /** Why it did not apply, when it failed. */
+  failure: string | null;
+  createdByName: string | null;
+}
+
 export type ExperimentStatus = "DRAFT" | "RUNNING" | "STOPPED";
 
 /** An A/B test on one flag in one environment. */

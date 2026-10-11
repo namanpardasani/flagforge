@@ -126,6 +126,8 @@ export function createFakeServer() {
   let remoteTurn = 0;
   let calls: Array<{ method: string; path: string; authorization: string | null }> = [];
   let inFlight = 0;
+  interface FakeScheduled { id: string; projectId: string; flagId: string; environmentId: string; runAt: string; patch: { enabled?: boolean; rolloutPercentage?: number; rules?: unknown[] }; status: "PENDING" | "RUNNING" | "APPLIED" | "CANCELLED" | "FAILED"; appliedAt: string | null; failure: string | null; createdBy: { id: string; name: string } | null }
+  let scheduledChanges: FakeScheduled[] = [];
   // Email flows: whether the signed-in user's address is confirmed, and the single-use links "emailed" so far.
   let emailVerified = true;
   let emailTokens = new Map<string, { kind: "verify" | "reset"; used: boolean; expired: boolean }>();
@@ -151,6 +153,7 @@ export function createFakeServer() {
     TEST_USER.password = "correct horse battery"; // a reset in one test must not change the next
     experiments = [];
     experimentCounts = {};
+    scheduledChanges = [];
     members = [
       { workspaceId: "ws_halden", userId: "u_jonas", name: "Jonas Reyes", email: "jonas@halden.example", role: "ADMIN", joinedAt: "2026-02-01T00:00:00Z" },
       { workspaceId: "ws_halden", userId: "u_tove", name: "Tove Lind", email: "tove@halden.example", role: "MEMBER", joinedAt: "2026-03-01T00:00:00Z" },
@@ -412,6 +415,45 @@ export function createFakeServer() {
       return new Response(null, { status: 204 });
     }
 
+    // ---- scheduled changes (mirrors apps/server/src/schedule) ----
+    const scheduledShape = (c: FakeScheduled) => {
+      const flag = flags.find((f) => f.id === c.flagId)!;
+      const environment = envsOf(c.projectId).find((e) => envId(c.projectId, e.key) === c.environmentId)!;
+      return { id: c.id, flagId: c.flagId, environmentId: c.environmentId, runAt: c.runAt, patch: c.patch, status: c.status, appliedAt: c.appliedAt, failure: c.failure, createdAt: now(), createdBy: c.createdBy, flag: { key: flag.key, name: flag.name }, environment: { key: environment.key, name: environment.name } };
+    };
+    if (tail === "/scheduled-changes" && method === "GET") {
+      const params = new URL(path, "http://x").searchParams;
+      const wanted = params.get("status") === "history" ? ["APPLIED", "FAILED", "CANCELLED"] : ["PENDING", "RUNNING"];
+      const list = scheduledChanges.filter((c) => c.projectId === proj.id && wanted.includes(c.status) && (!params.get("flagId") || c.flagId === params.get("flagId")));
+      list.sort((a, b) => (wanted[0] === "PENDING" ? a.runAt.localeCompare(b.runAt) : b.runAt.localeCompare(a.runAt)));
+      return json(200, { scheduledChanges: list.map(scheduledShape) });
+    }
+    const cancelRoute = /^\/scheduled-changes\/([^/]+)$/.exec(tail);
+    if (cancelRoute && method === "DELETE") {
+      const denied = need("MEMBER");
+      if (denied) return denied;
+      const change = scheduledChanges.find((c) => c.id === cancelRoute[1] && c.projectId === proj.id);
+      if (!change) return fail(404, "SCHEDULED_CHANGE_NOT_FOUND", "Scheduled change not found");
+      if (change.status !== "PENDING") return fail(409, "NOT_PENDING", "This change has already run, was cancelled, or is running now");
+      change.status = "CANCELLED";
+      return new Response(null, { status: 204 });
+    }
+    const scheduleRoute = /^\/flags\/([^/]+)\/environments\/([^/]+)\/schedule$/.exec(tail);
+    if (scheduleRoute && method === "POST") {
+      const denied = need("MEMBER");
+      if (denied) return denied;
+      const flag = flags.find((f) => f.id === scheduleRoute[1] && f.projectId === proj.id);
+      if (!flag) return fail(404, "FLAG_NOT_FOUND", "Flag not found");
+      if (!envsOf(proj.id).some((e) => envId(proj.id, e.key) === scheduleRoute[2])) return fail(404, "ENVIRONMENT_NOT_FOUND", "Environment not found");
+      const runAt = typeof body?.["runAt"] === "string" ? new Date(body["runAt"]) : null;
+      const change = body?.["change"] as FakeScheduled["patch"] | undefined;
+      if (!runAt || Number.isNaN(runAt.getTime()) || !change || Object.keys(change).length === 0) return fail(400, "VALIDATION_ERROR", "Invalid request");
+      if (runAt.getTime() - Date.now() < 60_000) return fail(400, "RUN_AT_TOO_SOON", "Choose a time at least a minute from now. To change something right away, change it directly");
+      const created: FakeScheduled = { id: `sch_${++sequence}`, projectId: proj.id, flagId: flag.id, environmentId: scheduleRoute[2]!, runAt: runAt.toISOString(), patch: change, status: "PENDING", appliedAt: null, failure: null, createdBy: { id: TEST_USER.id, name: TEST_USER.name } };
+      scheduledChanges.push(created);
+      return json(201, scheduledShape(created));
+    }
+
     // ---- experiments (mirrors apps/server/src/experiments) ----
     const expRoute = /^\/experiments(?:\/([^/]+)(?:\/(start|stop))?)?$/.exec(tail);
     if (expRoute) {
@@ -629,6 +671,25 @@ export function createFakeServer() {
     failNextWrite(error?: { status: number; code: string; message: string }) {
       failWrites = 1;
       if (error) failWith = error;
+    },
+    /** A planned change, as if made earlier. `minutesFromNow` may be negative for one that already ran. */
+    seedScheduledChange(input: { flagKey: string; envKey: string; minutesFromNow?: number; patch: FakeScheduled["patch"]; status?: FakeScheduled["status"]; failure?: string }) {
+      const proj = PROJECTS.find((p) => p.key === "dispatch-api")!;
+      const flag = flags.find((f) => f.projectId === proj.id && f.key === input.flagKey)!;
+      const change: FakeScheduled = { id: `sch_${++sequence}`, projectId: proj.id, flagId: flag.id, environmentId: envId(proj.id, input.envKey), runAt: new Date(Date.now() + (input.minutesFromNow ?? 60) * 60_000).toISOString(), patch: input.patch, status: input.status ?? "PENDING", appliedAt: input.status === "APPLIED" ? now() : null, failure: input.failure ?? null, createdBy: { id: "u_jonas", name: "Jonas Reyes" } };
+      scheduledChanges.push(change);
+      return change.id;
+    },
+    /** What the server's runner does when a change falls due: apply it to the flag and tell listeners. */
+    runScheduledChange(id: string) {
+      const change = scheduledChanges.find((c) => c.id === id)!;
+      const target = flags.find((f) => f.id === change.flagId)!.environments.find((e) => e.environmentId === change.environmentId)!;
+      if (change.patch.enabled !== undefined) target.enabled = change.patch.enabled;
+      if (change.patch.rolloutPercentage !== undefined) target.rolloutPercentage = change.patch.rolloutPercentage;
+      target.updatedAt = now();
+      change.status = "APPLIED";
+      change.appliedAt = now();
+      bump(change.environmentId);
     },
     /** Creates an experiment directly, as if made earlier. Returns its id. */
     seedExperiment(input: { projectKey?: string; flagKey: string; envKey: string; name?: string; metricKey?: string; status?: "DRAFT" | "RUNNING" | "STOPPED" }) {

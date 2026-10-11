@@ -12,6 +12,15 @@ describe("toAuditEntry", () => {
     expect(toAuditEntry(row("experiment.deleted", "experiment", meta)).detail).toBe('Deleted experiment "One-tap checkout"');
   });
 
+  it("describes scheduled changes: planned, applied, cancelled and failed", () => {
+    const meta = { key: "checkout", environmentKey: "prod", runAt: "2026-10-12T09:00:00.000Z", change: { enabled: true, rolloutPercentage: 25 } };
+    expect(toAuditEntry(row("flag.schedule_created", "flag", meta))).toMatchObject({ subject: "checkout", env: "prod", detail: "Scheduled for 12 Oct, 09:00 UTC: turn on, rollout 25%" });
+    expect(toAuditEntry(row("flag.schedule_applied", "flag", meta)).detail).toBe("Scheduled change applied (planned for 12 Oct, 09:00 UTC)");
+    expect(toAuditEntry(row("flag.schedule_cancelled", "flag", meta)).detail).toBe("Scheduled change cancelled (was for 12 Oct, 09:00 UTC)");
+    expect(toAuditEntry(row("flag.schedule_failed", "flag", { ...meta, failure: "The person who scheduled this can no longer change flags" })).detail).toBe("Scheduled change failed: The person who scheduled this can no longer change flags");
+    expect(toAuditEntry(row("flag.schedule_created", "flag", { key: "x" })).detail).toBe("Scheduled for later");
+  });
+
   it("copes with missing metadata", () => {
     expect(toAuditEntry(row("experiment.started", "experiment", null))).toMatchObject({ subject: "e1", detail: "Started experiment experiment" });
   });

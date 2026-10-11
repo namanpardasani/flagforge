@@ -6,6 +6,7 @@ import { Frame } from "@/components/blueprint/Frame";
 import { FigCaption, LiveDot } from "@/components/blueprint/marks";
 import { FlagToggle } from "@/components/flags/FlagToggle";
 import { RolloutPreview } from "@/components/flags/RolloutPreview";
+import { ScheduledChanges } from "@/components/flags/ScheduledChanges";
 import { RowFlash, UpdatedTag } from "@/components/flags/RowFlash";
 import { RuleBuilder } from "@/components/flags/RuleBuilder";
 import { useGuardedToggle } from "@/components/flags/use-flag-guard";
@@ -65,6 +66,7 @@ export function FlagDetailPage() {
       <RevealItem className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
         <TargetingEditor key={`${flag.id}:${env}`} flag={flag} env={env} project={scope.project} canEdit={canEdit} />
         <aside className="space-y-10">
+          <ScheduledChanges key={`${flag.id}:${env}`} flag={flag} env={env} project={scope.project} canEdit={canEdit} />
           <History entries={(activity.data ?? []).filter((a) => a.subject === flag.key)} loading={activity.isPending} allowed={can.readAuditLog(scope.role)} error={activity.error} />
         </aside>
       </RevealItem>

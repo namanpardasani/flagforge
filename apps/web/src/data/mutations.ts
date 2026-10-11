@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { fromRule } from "@/api/adapters";
-import { createExperiment, deleteExperiment, startExperiment, stopExperiment, addMember, changeMemberRole, createApiKey, createEnvironment, deleteEnvironment, removeMember, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
+import { cancelScheduledChange, createScheduledChange, createExperiment, deleteExperiment, startExperiment, stopExperiment, addMember, changeMemberRole, createApiKey, createEnvironment, deleteEnvironment, removeMember, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
 import { connectProjectStream } from "@/api/stream";
-import { envName, stateOf, type Role, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
+import { envName, stateOf, type ScheduledChangePatch, type Role, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
 import { flash, type FlashKind } from "@/stores/flash";
 import { setLiveStatus } from "@/stores/live";
 import { toast } from "@/stores/toasts";
@@ -196,6 +196,31 @@ export function useEnvironmentMutations(project: Project | undefined) {
   };
 }
 
+// ---- scheduled changes ---------------------------------------------------------------------------
+
+/** Not optimistic: the server checks the time, the limit and the rules, and a plan is only real once it says yes. */
+export function useScheduledChangeMutations(project: Project | undefined) {
+  const client = useQueryClient();
+  const projectId = project?.id ?? "none";
+  const refresh = () => {
+    void client.invalidateQueries({ queryKey: ["scheduled", projectId] });
+    void client.invalidateQueries({ queryKey: queryKeys.activity(projectId) });
+  };
+  return {
+    create: useMutation({
+      mutationFn: (input: { flagId: string; environmentId: string; runAt: string; change: ScheduledChangePatch }) => createScheduledChange(project!, input.flagId, input.environmentId, { runAt: input.runAt, change: input.change }),
+      onSuccess: () => toast("Change scheduled", { detail: "It runs by itself at that time." }),
+      onSettled: refresh,
+    }),
+    cancel: useMutation({
+      mutationFn: (changeId: string) => cancelScheduledChange(project!, changeId),
+      onSuccess: () => toast("Scheduled change cancelled"),
+      onError: (error: Error) => toast("Could not cancel", { detail: error.message, tone: "danger" }),
+      onSettled: refresh,
+    }),
+  };
+}
+
 // ---- experiments ---------------------------------------------------------------------------------
 
 /** Not optimistic: starting depends on rules only the server checks, and stopping or deleting is final. */
@@ -293,6 +318,7 @@ export function useLiveUpdates(project: Project | undefined, env: EnvKey) {
             if (was.get(flag.id) !== signature(stateOf(flag, env))) flash(flag.id, "remote");
           }
           void client.invalidateQueries({ queryKey: queryKeys.activity(project.id) });
+          void client.invalidateQueries({ queryKey: ["scheduled", project.id] }); // a planned change may just have run
         } while (again);
       })().finally(() => {
         running = null;

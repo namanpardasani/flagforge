@@ -1,6 +1,6 @@
 import type { Condition, Operator } from "@flagforge/core";
 import { z } from "zod";
-import { rememberEnvironments, type Experiment, type ExperimentResults, type ApiKey, type Member, type Activity, type Environment, type Flag, type FlagState, type Project, type TargetingRule, type User, type Workspace } from "./types";
+import { rememberEnvironments, type ScheduledChange, type Experiment, type ExperimentResults, type ApiKey, type Member, type Activity, type Environment, type Flag, type FlagState, type Project, type TargetingRule, type User, type Workspace } from "./types";
 
 /**
  * What the server sends (checked with Zod as it arrives) and how it becomes what the screens use.
@@ -142,6 +142,9 @@ export function fromRule(rule: TargetingRule) {
   };
 }
 
+/** A moment in UTC, short, for audit lines (the log says "times in UTC"). */
+const formatWhen = (iso: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(new Date(iso));
+
 const percent = (bps: unknown) => (typeof bps === "number" ? `${bps / 100}%` : "?");
 
 /** Turns one audit-log row into the short line the screens show. */
@@ -159,6 +162,15 @@ export function toAuditEntry(entry: AuditEntry): Activity {
     const before = (meta["before"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
     const after = (meta["after"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
     detail = before.fallthroughBps !== after.fallthroughBps ? `Rollout ${percent(before.fallthroughBps)} to ${percent(after.fallthroughBps)}` : `Rules updated (${after.rules?.length ?? 0})`;
+  } else if (entry.action.startsWith("flag.schedule_")) {
+    const planned = (meta["change"] ?? {}) as { enabled?: boolean; rolloutPercentage?: number };
+    const what = [planned.enabled === undefined ? null : planned.enabled ? "turn on" : "turn off", planned.rolloutPercentage === undefined ? null : `rollout ${planned.rolloutPercentage}%`].filter(Boolean).join(", ");
+    const when = typeof meta["runAt"] === "string" ? formatWhen(meta["runAt"]) : "later";
+    detail =
+      entry.action === "flag.schedule_created" ? `Scheduled for ${when}${what ? `: ${what}` : ""}` :
+      entry.action === "flag.schedule_applied" ? `Scheduled change applied (planned for ${when})` :
+      entry.action === "flag.schedule_cancelled" ? `Scheduled change cancelled (was for ${when})` :
+      entry.action === "flag.schedule_failed" ? `Scheduled change failed: ${text(meta["failure"]) ?? "unknown reason"}` : entry.action;
   } else if (entry.entityType === "experiment") {
     const name = text(meta["name"]);
     const label = name ? `"${name}"` : "experiment";
@@ -271,4 +283,33 @@ export const toResults = (r: z.infer<typeof resultsSchema>): ExperimentResults =
   groups: r.groups,
   analysis: r.analysis,
   sampleRatioChecked: r.sampleRatioChecked,
+});
+
+const scheduledSchema = z.object({
+  id: z.string(),
+  flagId: z.string(),
+  environmentId: z.string(),
+  runAt: z.string(),
+  patch: z.object({ enabled: z.boolean().optional(), rolloutPercentage: z.number().optional(), rules: z.array(z.unknown()).optional() }).passthrough(),
+  status: z.enum(["PENDING", "RUNNING", "APPLIED", "CANCELLED", "FAILED"]),
+  appliedAt: z.string().nullable(),
+  failure: z.string().nullable(),
+  createdBy: z.object({ name: z.string() }).nullable(),
+  flag: z.object({ key: z.string() }),
+  environment: z.object({ key: z.string(), name: z.string() }),
+});
+export { scheduledSchema };
+export const scheduledListSchema = z.object({ scheduledChanges: z.array(scheduledSchema) });
+export const toScheduledChange = (c: z.infer<typeof scheduledSchema>): ScheduledChange => ({
+  id: c.id,
+  flagId: c.flagId,
+  flagKey: c.flag.key,
+  environmentKey: c.environment.key,
+  environmentName: c.environment.name,
+  runAt: c.runAt,
+  patch: c.patch,
+  status: c.status,
+  appliedAt: c.appliedAt,
+  failure: c.failure,
+  createdByName: c.createdBy?.name ?? null,
 });

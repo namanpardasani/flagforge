@@ -1,6 +1,6 @@
-import { experimentSchema, experimentsSchema, resultsSchema, toExperiment, toResults, apiKeysSchema, toAuditEntry, environmentSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
+import { scheduledListSchema, scheduledSchema, toScheduledChange, experimentSchema, experimentsSchema, resultsSchema, toExperiment, toResults, apiKeysSchema, toAuditEntry, environmentSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
 import { request } from "./client";
-import type { Activity, ApiKey, Experiment, ExperimentResults, Flag, Member, Role, Project, Targeting, Workspace } from "./types";
+import type { ScheduledChange, ScheduledChangePatch, Activity, ApiKey, Experiment, ExperimentResults, Flag, Member, Role, Project, Targeting, Workspace } from "./types";
 
 /** One function per server route the dashboard uses. Each returns the app's own types. */
 
@@ -99,3 +99,13 @@ export const stopExperiment = async (project: Project, experimentId: string): Pr
   toExperiment(await request("POST", `${experimentsPath(project)}/${experimentId}/stop`, { schema: experimentSchema }));
 
 export const deleteExperiment = (project: Project, experimentId: string): Promise<void> => request("DELETE", `${experimentsPath(project)}/${experimentId}`);
+
+const scheduledPath = (project: Project) => `/workspaces/${project.workspaceId}/projects/${project.id}`;
+
+export const fetchScheduledChanges = async (project: Project, status: "pending" | "history", flagId: string): Promise<ScheduledChange[]> =>
+  (await request("GET", `${scheduledPath(project)}/scheduled-changes?status=${status}&flagId=${encodeURIComponent(flagId)}`, { schema: scheduledListSchema })).scheduledChanges.map(toScheduledChange);
+
+export const createScheduledChange = async (project: Project, flagId: string, environmentId: string, input: { runAt: string; change: ScheduledChangePatch }): Promise<ScheduledChange> =>
+  toScheduledChange(await request("POST", `${scheduledPath(project)}/flags/${flagId}/environments/${environmentId}/schedule`, { body: input, schema: scheduledSchema }));
+
+export const cancelScheduledChange = (project: Project, changeId: string): Promise<void> => request("DELETE", `${scheduledPath(project)}/scheduled-changes/${changeId}`);
