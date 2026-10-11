@@ -1,0 +1,105 @@
+$ pnpm --filter @flagforge/bench run eval
+$ node --expose-gc --import tsx eval.ts
+# Local evaluation speed
+
+environment: {
+  "date": "2026-10-11T13:30:08.790Z",
+  "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+  "logicalCores": 8,
+  "ramGb": 7.6,
+  "os": "Ubuntu 26.04.1 LTS",
+  "kernel": "6.18.40.1-microsoft-standard-WSL2",
+  "wsl": "WSL version: 3.0.1.0",
+  "node": "v24.21.0",
+  "postgres": "17.11 (Debian 17.11-1.pgdg12+2)",
+  "redis": "7.4.11",
+  "loadAverage1m5m15m": [
+    1.55,
+    1.72,
+    1.37
+  ],
+  "freeRamGb": 5.2,
+  "runningContainers": [
+    "flagforge-postgres (postgres:17-bookworm)",
+    "flagforge-redis (redis:7)"
+  ],
+  "containerLoad": [
+    "flagforge-postgres cpu=0.00% mem=319.1MiB / 7.635GiB",
+    "flagforge-redis cpu=0.56% mem=12.28MiB / 7.635GiB"
+  ]
+}
+
+garbage collection between phases: forced (node --expose-gc)
+
+ruleset: 5 rules (7 conditions), fallthrough rollout 20%
+decisions over 200,000 distinct users: on=78791 off=121209
+by reason: {"RULE_MATCH:pilot-depots":35721,"FALLTHROUGH":59338,"RULE_MATCH:nordic-loyal":54706,"RULE_MATCH:app-v4-paying":19101,"RULE_MATCH:enterprise":28821,"RULE_MATCH:staff":2313}
+
+timer overhead (two clock reads, nothing between): mean 0.062 us, p50 0.048 us, p95 0.083 us, p99 0.144 us
+
+## packages/core evaluateFlag: 5 runs of 1,000,000 evaluations (after 200,000 warm-up calls each)
+
+run | batch mean us | per-call mean | p50    | p95    | p99    | max us
+  1 |         1.519 |         1.656 |  0.984 |  3.883 | 18.271 | 8370.584
+  2 |         1.576 |         1.736 |  0.978 |  4.219 | 18.511 | 1755.655
+  3 |         1.642 |         1.844 |  1.007 |  4.206 | 18.710 | 3300.905
+  4 |         1.605 |         1.766 |  0.988 |  4.250 | 18.615 | 1606.162
+  5 |         1.706 |         1.830 |  0.998 |  4.259 | 18.664 | 8696.521
+
+median run (by batch mean): batch mean 1.605 us = 623,074 evaluations/second on one core
+  per-call (includes timer overhead): mean 1.766 us, p50 0.988 us, p95 4.250 us, p99 18.615 us
+
+## SDK client.evaluate (same flag, from memory): 5 runs of 1,000,000 evaluations (after 200,000 warm-up calls each)
+
+run | batch mean us | per-call mean | p50    | p95    | p99    | max us
+  1 |         1.508 |         1.605 |  1.001 |  3.894 | 18.007 | 1666.817
+  2 |         1.551 |         1.761 |  1.010 |  4.133 | 18.488 | 7747.866
+  3 |         1.603 |         1.772 |  1.013 |  4.023 | 18.426 | 6313.406
+  4 |         1.665 |         1.667 |  1.004 |  4.027 | 18.347 | 1989.638
+  5 |         1.636 |         1.740 |  1.015 |  4.197 | 18.516 | 8565.819
+
+median run (by batch mean): batch mean 1.603 us = 623,928 evaluations/second on one core
+  per-call (includes timer overhead): mean 1.772 us, p50 1.013 us, p95 4.023 us, p99 18.426 us
+
+## Summary (median runs)
+
+{
+  "evaluations": 1000000,
+  "runs": 5,
+  "distinctUsers": 200000,
+  "timerOverheadUs": {
+    "count": 1000000,
+    "mean": 0.06243693799969929,
+    "min": 0.03799999967668555,
+    "p50": 0.04799999987881165,
+    "p95": 0.08300000035887933,
+    "p99": 0.1440000000911823,
+    "max": 351.16199999993114
+  },
+  "core": {
+    "batchMeanUs": 1.604945723,
+    "perCall": {
+      "count": 1000000,
+      "mean": 1.7658134749993888,
+      "min": 0.10600000314298086,
+      "p50": 0.9879999997792765,
+      "p95": 4.249999998137355,
+      "p99": 18.6150000008638,
+      "max": 1606.1620000000403
+    },
+    "sink": 866701
+  },
+  "sdk": {
+    "batchMeanUs": 1.6027502630000001,
+    "perCall": {
+      "count": 1000000,
+      "mean": 1.7724293199965084,
+      "min": 0.11299999459879473,
+      "p50": 1.0129999936907552,
+      "p95": 4.023000001325272,
+      "p99": 18.426000002364162,
+      "max": 6313.406000001123
+    },
+    "sink": 866701
+  }
+}

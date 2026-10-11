@@ -1,0 +1,139 @@
+$ pnpm --filter @flagforge/bench run ramp
+$ tsx ramp.ts
+# Load ramp on GET /sdk/v1/flags (If-None-Match, answered 304)
+
+generator: Node (NOT k6), same machine as the server. environment: {
+  "date": "2026-10-11T13:36:39.842Z",
+  "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+  "logicalCores": 8,
+  "ramGb": 7.6,
+  "os": "Ubuntu 26.04.1 LTS",
+  "kernel": "6.18.40.1-microsoft-standard-WSL2",
+  "wsl": "WSL version: 3.0.1.0",
+  "node": "v24.21.0",
+  "postgres": "17.11 (Debian 17.11-1.pgdg12+2)",
+  "redis": "7.4.11",
+  "loadAverage1m5m15m": [
+    1.46,
+    1.08,
+    1.14
+  ],
+  "freeRamGb": 5,
+  "runningContainers": [
+    "flagforge-postgres (postgres:17-bookworm)",
+    "flagforge-redis (redis:7)"
+  ],
+  "containerLoad": [
+    "flagforge-postgres cpu=0.02% mem=327.1MiB / 7.635GiB",
+    "flagforge-redis cpu=0.48% mem=14.36MiB / 7.635GiB"
+  ]
+}
+
+response size: 1556 bytes (20 flags). hold per step: 15s (first 2s discarded). rates: 500, 1000, 2000, 3000, 4000, 5000, 6000 requests/second
+
+target | achieved |  failed |   p50 ms |   p95 ms |   p99 ms |   max ms | generator loop p99 ms
+   500 |    499.9 |       0 |      4.1 |      5.5 |      6.2 |      9.4 |      6.0
+  1000 |    999.9 |       0 |      3.4 |      5.1 |      6.3 |     15.9 |      6.0
+  2000 |   1999.6 |       0 |      3.4 |      8.1 |     23.1 |     51.9 |      6.0
+  3000 |   2999.4 |       0 |      3.7 |      8.6 |     17.3 |    100.0 |      6.0
+  4000 |   3583.3 |       0 |     19.4 |    159.0 |   3082.1 |   4466.2 |      7.1
+  5000 |   4448.8 |       0 |    920.2 |   1592.2 |   1724.0 |  14057.9 |      8.5
+  6000 |   4010.4 |       0 |   5033.3 |   7104.8 |   7317.9 |   7376.2 |     27.7  <- generator strained
+
+baseline p95 (lowest step): 5.5 ms
+first degraded step: 4000 requests/second (p95 159.0 ms, achieved 3583.3/s, 0 failed)
+last stable step: 3000 requests/second: p95 8.6 ms, achieved 2999.4/s, 0 failed of 45000
+
+{
+ "mode": "poll",
+ "holdSeconds": 15,
+ "responseBytes": 1556,
+ "steps": [
+  {
+   "target": 500,
+   "achieved": 499.9,
+   "sent": 7500,
+   "failed": 0,
+   "p50": 4.129179999999906,
+   "p95": 5.5138350000015635,
+   "p99": 6.21334200000274,
+   "max": 9.449383000002854,
+   "loopP99": 6.045695,
+   "generatorStrained": false
+  },
+  {
+   "target": 1000,
+   "achieved": 999.9,
+   "sent": 15000,
+   "failed": 0,
+   "p50": 3.3940159999983734,
+   "p95": 5.133902000001399,
+   "p99": 6.331665999998222,
+   "max": 15.865771999997378,
+   "loopP99": 6.029311,
+   "generatorStrained": false
+  },
+  {
+   "target": 2000,
+   "achieved": 1999.6,
+   "sent": 30000,
+   "failed": 0,
+   "p50": 3.3910219999961555,
+   "p95": 8.112096999997448,
+   "p99": 23.0595869999961,
+   "max": 51.85403199999564,
+   "loopP99": 6.017023,
+   "generatorStrained": false
+  },
+  {
+   "target": 3000,
+   "achieved": 2999.4,
+   "sent": 45000,
+   "failed": 0,
+   "p50": 3.6772806666704128,
+   "p95": 8.574993000001996,
+   "p99": 17.30096466667601,
+   "max": 100.03925533333677,
+   "loopP99": 6.000639,
+   "generatorStrained": false
+  },
+  {
+   "target": 4000,
+   "achieved": 3583.3,
+   "sent": 60000,
+   "failed": 0,
+   "p50": 19.398291999998037,
+   "p95": 158.95278099999996,
+   "p99": 3082.080243000004,
+   "max": 4466.155228000003,
+   "loopP99": 7.147519,
+   "generatorStrained": false
+  },
+  {
+   "target": 5000,
+   "achieved": 4448.8,
+   "sent": 75000,
+   "failed": 0,
+   "p50": 920.1601859999937,
+   "p95": 1592.213699,
+   "p99": 1724.009017999997,
+   "max": 14057.935045000006,
+   "loopP99": 8.478719,
+   "generatorStrained": false
+  },
+  {
+   "target": 6000,
+   "achieved": 4010.4,
+   "sent": 90000,
+   "failed": 0,
+   "p50": 5033.300972333338,
+   "p95": 7104.849603666677,
+   "p99": 7317.89714833333,
+   "max": 7376.1733273333375,
+   "loopP99": 27.721727,
+   "generatorStrained": true
+  }
+ ],
+ "firstDegraded": 4000,
+ "lastStable": 3000
+}

@@ -1,0 +1,86 @@
+$ pnpm --filter @flagforge/bench run cache
+$ tsx cache.ts
+# Database read reduction from the Redis cache
+
+environment: {
+  "date": "2026-10-11T13:32:41.651Z",
+  "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+  "logicalCores": 8,
+  "ramGb": 7.6,
+  "os": "Ubuntu 26.04.1 LTS",
+  "kernel": "6.18.40.1-microsoft-standard-WSL2",
+  "wsl": "WSL version: 3.0.1.0",
+  "node": "v24.21.0",
+  "postgres": "17.11 (Debian 17.11-1.pgdg12+2)",
+  "redis": "7.4.11",
+  "loadAverage1m5m15m": [
+    0.28,
+    1.19,
+    1.23
+  ],
+  "freeRamGb": 5,
+  "runningContainers": [
+    "flagforge-postgres (postgres:17-bookworm)",
+    "flagforge-redis (redis:7)"
+  ],
+  "containerLoad": [
+    "flagforge-postgres cpu=0.78% mem=324.5MiB / 7.635GiB",
+    "flagforge-redis cpu=0.34% mem=14.5MiB / 7.635GiB"
+  ]
+}
+other active sessions on this database at the start: 0
+data: 1 environment with 20 flags, 1 API key
+
+## A) Redis cache ENABLED (starting empty)
+
+requests: 1000   responses by status: {"200":1000}   took 1.50 s (668 requests/second, one at a time)
+database operations issued by the server: 3
+  by operation: {"ApiKey.findUnique":1,"Environment.findFirst":1,"Flag.findMany":1}
+table scans recorded by PostgreSQL (pg_stat_user_tables): 7
+
+## B) Redis cache DISABLED
+
+requests: 1000   responses by status: {"200":1000}   took 3.86 s (259 requests/second, one at a time)
+database operations issued by the server: 3000
+  by operation: {"ApiKey.findUnique":1000,"Environment.findFirst":1000,"Flag.findMany":1000}
+table scans recorded by PostgreSQL (pg_stat_user_tables): 5004
+
+## Result
+
+database operations for 1000 requests:  without cache 3000,  with cache 3
+  reduction = (without - with) / without = (3000 - 3) / 3000 = 99.90%
+PostgreSQL table scans for the same requests:  without cache 5004,  with cache 7
+  reduction = (5004 - 7) / 5004 = 99.86%
+
+{
+  "requests": 1000,
+  "flags": 20,
+  "withCache": {
+    "label": "A) Redis cache ENABLED (starting empty)",
+    "requests": 1000,
+    "statuses": {
+      "200": 1000
+    },
+    "operations": 3,
+    "byOperation": {
+      "ApiKey.findUnique": 1,
+      "Environment.findFirst": 1,
+      "Flag.findMany": 1
+    },
+    "tableScans": 7
+  },
+  "withoutCache": {
+    "label": "B) Redis cache DISABLED",
+    "requests": 1000,
+    "statuses": {
+      "200": 1000
+    },
+    "operations": 3000,
+    "byOperation": {
+      "ApiKey.findUnique": 1000,
+      "Environment.findFirst": 1000,
+      "Flag.findMany": 1000
+    },
+    "tableScans": 5004
+  }
+}

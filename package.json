@@ -2,5 +2,14 @@
   "name": "flagforge",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@12.10.1"
+  "packageManager": "pnpm@12.10.1",
+  "scripts": {
+    "bench:env": "pnpm --filter @flagforge/bench run env",
+    "bench:eval": "pnpm --filter @flagforge/bench run eval",
+    "bench:server": "pnpm --filter @flagforge/bench run server",
+    "bench:propagation": "pnpm --filter @flagforge/bench run propagation",
+    "bench:cache": "pnpm --filter @flagforge/bench run cache",
+    "bench:load": "k6 run loadtest/sdk-config.js",
+    "bench:ramp": "pnpm --filter @flagforge/bench run ramp"
+  }
 }

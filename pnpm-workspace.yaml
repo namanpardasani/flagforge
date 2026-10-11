@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "bench"
   
 allowBuilds:
   '@prisma/engines': true

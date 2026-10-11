@@ -1,0 +1,25 @@
+{
+  "name": "@flagforge/bench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reproducible benchmarks. Scripts only: nothing here is used by the application",
+  "type": "module",
+  "scripts": {
+    "env": "tsx env.ts",
+    "eval": "node --expose-gc --import tsx eval.ts",
+    "server": "tsx server.ts",
+    "propagation": "tsx propagation.ts",
+    "cache": "tsx cache.ts",
+    "ramp": "tsx ramp.ts"
+  },
+  "dependencies": {
+    "@flagforge/core": "workspace:*",
+    "@flagforge/sdk": "workspace:*",
+    "pino": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
