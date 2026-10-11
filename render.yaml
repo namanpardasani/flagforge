@@ -6,14 +6,15 @@ services:
     runtime: node
     plan: free
     region: frankfurt
+    # `corepack pnpm` runs the pnpm version pinned in package.json without `corepack enable`, which
+    # tries to write to /usr/bin and fails on Render's read-only system directories.
     buildCommand: >-
-      corepack enable &&
-      pnpm install --frozen-lockfile &&
+      corepack pnpm install --frozen-lockfile &&
       cd apps/server &&
-      pnpm exec prisma generate &&
+      corepack pnpm exec prisma generate &&
       node build.mjs
     # Migrations run before the server starts, so a deploy never serves requests against an old schema.
-    startCommand: cd apps/server && pnpm exec prisma migrate deploy && node --enable-source-maps dist/server.js
+    startCommand: cd apps/server && corepack pnpm exec prisma migrate deploy && node --enable-source-maps dist/server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
