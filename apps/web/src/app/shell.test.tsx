@@ -228,10 +228,18 @@ describe("flag list basics", () => {
   });
 });
 
-describe("pages not built yet", () => {
-  it("explain themselves instead of looking broken", async () => {
-    await renderApp("/w/halden/p/dispatch-api/audit-log");
-    expect(await screen.findByRole("heading", { level: 2, name: "Audit log is not wired up yet" })).toBeInTheDocument();
+describe("every sidebar page", () => {
+  it.each(["overview", "flags", "environments", "api-keys", "members", "audit-log"])("%s opens a real screen, not a placeholder or a 404", async (page) => {
+    await renderApp(`/w/halden/p/dispatch-api/${page}`);
+    const heading = await screen.findByRole("heading", { level: 1 });
+    expect(heading).toBeInTheDocument();
+    expect(screen.queryByText(/not wired up/)).not.toBeInTheDocument();
+    expect(screen.queryByText("404")).not.toBeInTheDocument();
+  });
+
+  it("an address that matches no page says so", async () => {
+    await renderApp("/w/halden/p/dispatch-api/nonsense");
+    expect(await screen.findByText("404")).toBeInTheDocument();
   });
 });
 

@@ -163,6 +163,7 @@ describe("audit trail", () => {
     const entries = (await get(owner, `/workspaces/${wsId}/audit-log`)).body.entries;
     expect(entries.map((e: { action: string }) => e.action).slice(0, 2)).toEqual(["apikey.revoked", "apikey.created"]);
     expect(entries[1].metadata).toMatchObject({ name: "backend", prefix: key.prefix, environmentKey: "dev" });
+    expect(entries[0].metadata).toMatchObject({ name: "backend", prefix: key.prefix, environmentKey: "dev" }); // revocation names the key too
     expect(entries[1].actor.id).toBe(admin.id);
     expect(JSON.stringify(entries)).not.toContain(key.key);
   });

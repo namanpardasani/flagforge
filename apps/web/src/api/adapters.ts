@@ -56,19 +56,17 @@ export const flagSchema = z.object({
 });
 export const flagsSchema = z.object({ flags: z.array(flagSchema) });
 
-export const auditSchema = z.object({
-  entries: z.array(
-    z.object({
-      id: z.string(),
-      action: z.string(),
-      entityType: z.string(),
-      entityId: z.string(),
-      metadata: z.unknown(),
-      createdAt: z.string(),
-      actor: z.object({ name: z.string() }).nullable(),
-    }),
-  ),
+const auditEntrySchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  metadata: z.unknown(),
+  createdAt: z.string(),
+  actor: z.object({ name: z.string() }).nullable(),
 });
+export const auditSchema = z.object({ entries: z.array(auditEntrySchema), nextCursor: z.string().nullable().optional() });
+type AuditEntry = z.infer<typeof auditEntrySchema>;
 
 type ServerRule = z.infer<typeof ruleSchema>;
 type ServerFlag = z.infer<typeof flagSchema>;
@@ -146,36 +144,46 @@ export function fromRule(rule: TargetingRule) {
 
 const percent = (bps: unknown) => (typeof bps === "number" ? `${bps / 100}%` : "?");
 
-/** Turns audit-log rows into the short lines the screens show. Rows about other projects are dropped. */
-export function toActivity(entries: z.infer<typeof auditSchema>["entries"], project: Project, flags: readonly Flag[]): Activity[] {
-  const flagIds = new Set(flags.map((f) => f.id));
-  const result: Activity[] = [];
-  for (const entry of entries) {
-    const meta = (entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {}) as Record<string, unknown>;
-    if (entry.entityType !== "flag") continue;
-    if (!flagIds.has(entry.entityId) && meta["projectId"] !== project.id) continue;
+/** Turns one audit-log row into the short line the screens show. */
+export function toAuditEntry(entry: AuditEntry): Activity {
+  const meta = (entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {}) as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
 
-    let detail = entry.action;
-    if (entry.action === "flag.toggled") detail = meta["to"] === true ? "Turned on" : "Turned off";
-    else if (entry.action === "flag.created") detail = "Created";
-    else if (entry.action === "flag.deleted") detail = "Deleted";
-    else if (entry.action === "flag.updated") detail = "Name or description changed";
-    else if (entry.action === "flag.targeting_updated") {
-      const before = (meta["before"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
-      const after = (meta["after"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
-      detail = before.fallthroughBps !== after.fallthroughBps ? `Rollout ${percent(before.fallthroughBps)} to ${percent(after.fallthroughBps)}` : `Rules updated (${after.rules?.length ?? 0})`;
-    }
-    result.push({
-      id: entry.id,
-      at: entry.createdAt,
-      actor: entry.actor?.name ?? "Someone who has left",
-      action: entry.action,
-      subject: typeof meta["key"] === "string" ? meta["key"] : entry.entityId,
-      ...(typeof meta["environmentKey"] === "string" ? { env: meta["environmentKey"] } : {}),
-      detail,
-    });
+  let detail = entry.action;
+  let subject = text(meta["key"]) ?? entry.entityId;
+  if (entry.action === "flag.toggled") detail = meta["to"] === true ? "Turned on" : "Turned off";
+  else if (entry.action === "flag.created") detail = "Created";
+  else if (entry.action === "flag.deleted") detail = "Deleted";
+  else if (entry.action === "flag.updated") detail = "Name or description changed";
+  else if (entry.action === "flag.targeting_updated") {
+    const before = (meta["before"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
+    const after = (meta["after"] ?? {}) as { fallthroughBps?: unknown; rules?: unknown[] };
+    detail = before.fallthroughBps !== after.fallthroughBps ? `Rollout ${percent(before.fallthroughBps)} to ${percent(after.fallthroughBps)}` : `Rules updated (${after.rules?.length ?? 0})`;
+  } else if (entry.entityType === "api_key") {
+    subject = text(meta["name"]) ?? text(meta["prefix"]) ?? entry.entityId;
+    const prefix = text(meta["prefix"]);
+    detail = entry.action === "apikey.created" ? `Created key${prefix ? ` ${prefix}…` : ""}` : entry.action === "apikey.revoked" ? `Revoked key${prefix ? ` ${prefix}…` : ""}` : entry.action;
   }
-  return result;
+  return {
+    id: entry.id,
+    at: entry.createdAt,
+    actor: entry.actor?.name ?? "Someone who has left",
+    action: entry.action,
+    subject,
+    ...(text(meta["environmentKey"]) ? { env: text(meta["environmentKey"])! } : {}),
+    detail,
+  };
+}
+
+/** The flag history of one project, from the workspace-wide log. Rows about other projects are dropped. */
+export function toActivity(entries: AuditEntry[], project: Project, flags: readonly Flag[]): Activity[] {
+  const flagIds = new Set(flags.map((f) => f.id));
+  return entries
+    .filter((entry) => {
+      const meta = (entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {}) as Record<string, unknown>;
+      return entry.entityType === "flag" && (flagIds.has(entry.entityId) || meta["projectId"] === project.id);
+    })
+    .map(toAuditEntry);
 }
 
 const apiKeySchema = z.object({ id: z.string(), name: z.string(), prefix: z.string(), createdAt: z.string(), revokedAt: z.string().nullable() });

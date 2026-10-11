@@ -239,13 +239,27 @@ export function createFlagService(prisma: PrismaClient, notifier: ChangeNotifier
       return loadFlag(workspaceId, projectId, flagId);
     },
 
-    listAuditLog(workspaceId: string, limit: number) {
-      return prisma.auditLog.findMany({
-        where: { workspaceId },
+    /**
+     * Newest first, one page at a time. `before` is the id of the last entry the caller already has;
+     * `nextCursor` is the id to pass for the following page, or null when there is nothing older.
+     * The cursor is looked up inside THIS workspace, so another tenant's entry id is simply invalid.
+     */
+    async listAuditLog(workspaceId: string, limit: number, before?: string) {
+      let after: { OR: Array<Record<string, unknown>> } | undefined;
+      if (before) {
+        const anchor = await prisma.auditLog.findFirst({ where: { id: before, workspaceId }, select: { id: true, createdAt: true } });
+        if (!anchor) throw new AppError(400, "INVALID_CURSOR", "Unknown audit log cursor");
+        after = { OR: [{ createdAt: { lt: anchor.createdAt } }, { createdAt: anchor.createdAt, id: { lt: anchor.id } }] };
+      }
+      // One extra row tells us whether there is another page without a second count query.
+      const rows = await prisma.auditLog.findMany({
+        where: { workspaceId, ...after },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        take: limit,
+        take: limit + 1,
         include: { actor: { select: { id: true, name: true, email: true } } },
       });
+      const entries = rows.slice(0, limit);
+      return { entries, nextCursor: rows.length > limit ? entries[entries.length - 1]!.id : null };
     },
   };
 }

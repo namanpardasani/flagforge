@@ -165,6 +165,47 @@ describe("audit log", () => {
     expect((await get(owner, `/workspaces/${wsId}/audit-log?limit=101`)).status).toBe(400);
   });
 
+  it("pages through the whole log without gaps or repeats, newest first", async () => {
+    const flag = (await createFlag(owner)).body;
+    for (let i = 0; i < 6; i++) await toggle(owner, flag.id, devId, i % 2 === 0);
+    const all = (await get(owner, `/workspaces/${wsId}/audit-log?limit=100`)).body;
+    expect(all.entries).toHaveLength(7); // created + six toggles
+    expect(all.nextCursor).toBeNull();
+
+    const seen: string[] = [];
+    let before: string | null = null;
+    let pages = 0;
+    do {
+      const res: { body: { entries: { id: string }[]; nextCursor: string | null } } = await get(owner, `/workspaces/${wsId}/audit-log?limit=3${before ? `&before=${before}` : ""}`);
+      seen.push(...res.body.entries.map((e) => e.id));
+      before = res.body.nextCursor;
+      pages++;
+    } while (before);
+    expect(pages).toBe(3); // 3 + 3 + 1
+    expect(seen).toEqual(all.entries.map((e: { id: string }) => e.id));
+  });
+
+  it("returns no cursor when the last page is exactly full", async () => {
+    await createFlag(owner);
+    await createFlag(owner, { key: "second", name: "Second" });
+    const res = (await get(owner, `/workspaces/${wsId}/audit-log?limit=2`)).body;
+    expect(res.entries).toHaveLength(2);
+    expect(res.nextCursor).toBeNull();
+  });
+
+  it("rejects a cursor that is not in this workspace (another tenant's entry id is invalid)", async () => {
+    await createFlag(owner);
+    const otherWs = (await post(outsider, "/workspaces", { name: "Other", slug: "other" })).body.id;
+    const otherProject = (await post(outsider, `/workspaces/${otherWs}/projects`, { name: "Other app", key: "other-app" })).body.id;
+    await createFlag(outsider, { key: "theirs", name: "T" }, otherWs, otherProject);
+    const theirs = (await get(outsider, `/workspaces/${otherWs}/audit-log`)).body.entries[0].id;
+
+    const res = await get(owner, `/workspaces/${wsId}/audit-log?before=${theirs}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_CURSOR");
+    expect((await get(owner, `/workspaces/${wsId}/audit-log?before=nope`)).status).toBe(400);
+  });
+
   it("is readable by ADMIN and up only", async () => {
     for (const u of [owner, admin]) expect((await get(u, `/workspaces/${wsId}/audit-log`)).status).toBe(200);
     for (const u of [member, viewer]) expect((await get(u, `/workspaces/${wsId}/audit-log`)).status).toBe(403);

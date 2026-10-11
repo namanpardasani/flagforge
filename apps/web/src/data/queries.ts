@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchActivity, fetchApiKeys, fetchMembers, fetchFlags, fetchProjects, fetchWorkspaces } from "@/api/endpoints";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchActivity, fetchApiKeys, fetchAuditPage, fetchMembers, fetchFlags, fetchProjects, fetchWorkspaces } from "@/api/endpoints";
 import { useSession } from "@/api/session";
 import { can, type Project, type Role } from "@/api/types";
 import { useLiveStatus } from "@/stores/live";
@@ -18,6 +18,7 @@ export const queryKeys = {
   projects: (workspaceId: string) => ["projects", workspaceId] as const,
   flags: (projectId: string) => ["flags", projectId] as const,
   activity: (projectId: string) => ["activity", projectId] as const,
+  auditLog: (workspaceId: string) => ["audit-log", workspaceId] as const,
   members: (workspaceId: string) => ["members", workspaceId] as const,
   apiKeys: (environmentId: string) => ["api-keys", environmentId] as const,
 };
@@ -67,3 +68,13 @@ export const useApiKeys = (project: Project | undefined, environmentId: string |
 /** Everyone in a workspace. Any member may read the list. */
 export const useMembers = (workspaceId: string | undefined) =>
   useQuery({ queryKey: queryKeys.members(workspaceId ?? "none"), queryFn: () => fetchMembers(workspaceId!), enabled: workspaceId !== undefined });
+
+/** The whole workspace audit log, loaded a page at a time. Admin-only on the server. */
+export const useAuditLog = (workspaceId: string | undefined, role: Role | undefined) =>
+  useInfiniteQuery({
+    queryKey: queryKeys.auditLog(workspaceId ?? "none"),
+    queryFn: ({ pageParam }) => fetchAuditPage(workspaceId!, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled: workspaceId !== undefined && can.readAuditLog(role),
+  });

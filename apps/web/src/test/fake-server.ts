@@ -122,6 +122,7 @@ export function createFakeServer() {
   let remoteTurn = 0;
   let calls: Array<{ method: string; path: string; authorization: string | null }> = [];
   let inFlight = 0;
+  let failNextRead: { pattern: RegExp; status: number } | null = null;
   let projectEnvs: Record<string, Array<{ key: string; name: string }>> = {};
   let members: Array<{ workspaceId: string; userId: string; name: string; email: string; role: Role; joinedAt: string }> = [];
   let apiKeys: Array<{ id: string; environmentId: string; name: string; prefix: string; createdAt: string; revokedAt: string | null }> = [];
@@ -150,6 +151,7 @@ export function createFakeServer() {
     failWrites = 0;
     failWith = { status: 503, code: "UNAVAILABLE", message: "The server refused the change" };
     offline = false;
+    failNextRead = null;
     sequence = 0;
     remoteTurn = 0;
     calls = [];
@@ -317,7 +319,21 @@ export function createFakeServer() {
     }
 
     if (rest === "/projects" && method === "GET") return json(200, { projects: PROJECTS.filter((p) => p.workspaceSlug === ws.slug).map(project) });
-    if (rest === "/audit-log" && method === "GET") return need("ADMIN") ?? json(200, { entries: audit });
+    if (rest === "/audit-log" && method === "GET") {
+      const denied = need("ADMIN");
+      if (denied) return denied;
+      const params = new URL(path, "http://x").searchParams;
+      const limit = Number(params.get("limit") ?? 50);
+      const before = params.get("before");
+      let start = 0;
+      if (before) {
+        const at = audit.findIndex((e) => e.id === before);
+        if (at === -1) return fail(400, "INVALID_CURSOR", "Unknown audit log cursor");
+        start = at + 1;
+      }
+      const page = audit.slice(start, start + limit);
+      return json(200, { entries: page, nextCursor: audit.length > start + limit ? page[page.length - 1]!.id : null });
+    }
 
     const inProject = /^\/projects\/([^/]+)(\/.*)?$/.exec(rest);
     const proj = inProject ? PROJECTS.find((p) => p.id === inProject[1] && p.workspaceSlug === ws.slug) : undefined;
@@ -365,12 +381,14 @@ export function createFakeServer() {
         const secret = `ff_${token("secret")}${"x".repeat(24)}`; // the real key is "ff_" plus 48 characters
         const created = { id: `key_${++sequence}`, environmentId, name: String(body?.["name"]), prefix: secret.slice(0, 10), createdAt: now(), revokedAt: null };
         apiKeys = [...apiKeys, created];
+        audit = [{ id: `audit_${++sequence}`, action: "apikey.created", entityType: "api_key", entityId: created.id, metadata: { name: created.name, prefix: created.prefix, environmentKey: environment.key }, createdAt: now(), actor: { id: TEST_USER.id, name: TEST_USER.name, email: TEST_USER.email } }, ...audit];
         return json(201, { ...publicKey(created), key: secret });
       }
       if (method === "DELETE") {
         const key = apiKeys.find((k) => k.id === keysRoute[2] && k.environmentId === environmentId && !k.revokedAt);
         if (!key) return fail(404, "API_KEY_NOT_FOUND", "API key not found");
         key.revokedAt = now();
+        audit = [{ id: `audit_${++sequence}`, action: "apikey.revoked", entityType: "api_key", entityId: key.id, metadata: { name: key.name, prefix: key.prefix, environmentKey: environment.key }, createdAt: now(), actor: { id: TEST_USER.id, name: TEST_USER.name, email: TEST_USER.email } }, ...audit];
         return new Response(null, { status: 204 });
       }
     }
@@ -451,6 +469,11 @@ export function createFakeServer() {
       await new Promise((resolve) => setTimeout(resolve, 0)); // answers are never synchronous, like a network
       if (init?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
       if (offline) throw new TypeError("Failed to fetch");
+      if (failNextRead && method === "GET" && failNextRead.pattern.test(path)) {
+        const { status } = failNextRead;
+        failNextRead = null; // once: the retry works
+        return fail(status, "INTERNAL_ERROR", "Internal server error");
+      }
 
       const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : undefined;
       return await handle(method, path, body, headers.get("Authorization"), init?.signal);
@@ -499,6 +522,23 @@ export function createFakeServer() {
     failNextWrite(error?: { status: number; code: string; message: string }) {
       failWrites = 1;
       if (error) failWith = error;
+    },
+    /** Pads the log with older entries, to exercise paging. */
+    addOldAuditEntries(count: number) {
+      const old = Array.from({ length: count }, (_, i) => ({
+        id: `audit_old_${i}`,
+        action: "flag.toggled",
+        entityType: "flag",
+        entityId: "fl_01",
+        metadata: { key: `legacy-flag-${i}`, environmentKey: "dev", from: false, to: true },
+        createdAt: new Date(Date.UTC(2026, 0, 1) + (count - i) * 60_000).toISOString(),
+        actor: { id: "u_old", name: "Tove Lind", email: "tove@halden.example" },
+      }));
+      audit = [...audit, ...old];
+    },
+    /** The next GET whose path matches answers with this error status, once. */
+    failNextGet(pattern: RegExp, status = 500) {
+      failNextRead = { pattern, status };
     },
     setOffline(value: boolean) {
       offline = value;

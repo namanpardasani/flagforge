@@ -65,7 +65,7 @@ export function createApiKeyService(prisma: PrismaClient, bus: EventBus, keyCach
       const environment = await requireEnvironment(workspaceId, projectId, environmentId);
       const existing = await prisma.apiKey.findFirst({
         where: { id: apiKeyId, environmentId, workspaceId },
-        select: { keyHash: true },
+        select: { keyHash: true, name: true, prefix: true },
       });
       await prisma.$transaction(async (tx) => {
         // revokedAt: null in the filter makes this atomic and idempotent-safe: a second revoke is a 404.
@@ -80,7 +80,8 @@ export function createApiKeyService(prisma: PrismaClient, bus: EventBus, keyCach
           action: "apikey.revoked",
           entityType: "api_key",
           entityId: apiKeyId,
-          metadata: { environmentId, environmentKey: environment.key },
+          // Name and prefix are recorded so the log can say WHICH key, even though the key row stays hidden.
+          metadata: { environmentId, environmentKey: environment.key, ...(existing ? { name: existing.name, prefix: existing.prefix } : {}) },
         });
       });
       // Revocation must be immediate: forget the key everywhere BEFORE anything else can use the cached copy.

@@ -86,8 +86,8 @@ export function flagsRouter(service: FlagService, prisma: PrismaClient, config: 
     admin,
     validate(auditQuerySchema, "query"),
     async (req, res) => {
-      const { limit } = req.query as unknown as { limit: number };
-      res.json({ entries: await service.listAuditLog(req.membership!.workspaceId, limit) });
+      const { limit, before } = req.query as unknown as { limit: number; before?: string };
+      res.json(await service.listAuditLog(req.membership!.workspaceId, limit, before));
     },
   );
 

@@ -1,4 +1,4 @@
-import { apiKeysSchema, environmentSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
+import { apiKeysSchema, toAuditEntry, environmentSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
 import { request } from "./client";
 import type { Activity, ApiKey, Flag, Member, Role, Project, Targeting, Workspace } from "./types";
 
@@ -75,3 +75,9 @@ export const createEnvironment = async (project: Project, input: { name: string;
 };
 
 export const deleteEnvironment = (project: Project, environmentId: string): Promise<void> => request("DELETE", `${environmentsPath(project)}/${environmentId}`);
+
+/** One page of the workspace audit log, newest first. Pass the previous page's cursor to continue. */
+export async function fetchAuditPage(workspaceId: string, before?: string): Promise<{ entries: Activity[]; nextCursor: string | null }> {
+  const page = await request("GET", `/workspaces/${workspaceId}/audit-log?limit=50${before ? `&before=${encodeURIComponent(before)}` : ""}`, { schema: auditSchema });
+  return { entries: page.entries.map(toAuditEntry), nextCursor: page.nextCursor ?? null };
+}

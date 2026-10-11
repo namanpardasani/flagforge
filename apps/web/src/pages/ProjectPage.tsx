@@ -1,9 +1,8 @@
 import { Link, useParams } from "react-router";
 import { FigCaption } from "@/components/blueprint/marks";
-import { ALL_NAV_ITEMS } from "@/components/shell/nav";
 import { paths, useScope } from "@/components/shell/use-scope";
-import { EmptyState } from "@/components/ui/empty-state";
 import { ApiKeysPage } from "./ApiKeys";
+import { AuditLogPage } from "./AuditLog";
 import { EnvironmentsPage } from "./Environments";
 import { FlagsPage } from "./Flags";
 import { MembersPage } from "./Members";
@@ -17,24 +16,9 @@ export function ProjectPage() {
   if (page === "api-keys") return <ApiKeysPage />;
   if (page === "members") return <MembersPage />;
   if (page === "environments") return <EnvironmentsPage />;
+  if (page === "audit-log") return <AuditLogPage />;
 
-  const item = ALL_NAV_ITEMS.find((i) => i.page === page);
-  return item ? <NotBuiltYet label={item.label} /> : <NotFound />;
-}
-
-/** Screens that exist in the navigation but are built in a later step. Says so plainly. */
-function NotBuiltYet({ label }: { label: string }) {
-  return (
-    <div className="space-y-8">
-      <header>
-        <FigCaption index="2.0" label={label} />
-        <h1 className="mt-4 text-3xl font-medium leading-[1.15] tracking-tight text-ink">{label}</h1>
-      </header>
-      <EmptyState fig="2.1" title={`${label} is not wired up yet`}>
-        The server already supports this. Its screen is built in a later step, so for now this page only shows that the shell, the navigation and this empty state work.
-      </EmptyState>
-    </div>
-  );
+  return <NotFound />;
 }
 
 export function NotFound() {

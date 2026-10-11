@@ -18,6 +18,8 @@ export const updateFlagSchema = z
 
 export const auditQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
+  /** The id of the last entry already seen: the next page starts just after it. */
+  before: z.string().min(1).max(64).optional(),
 });
 
 const id = z.string().min(1).max(64);

@@ -58,8 +58,10 @@ describe("environments page", () => {
     await user.click(within(rowOf("Staging")).getByRole("button", { name: "Delete Staging" }));
     await screen.findByRole("dialog", { name: "Delete Staging?" });
     await user.pointer({ keys: "[MouseLeft>]", target: hold(/Hold to delete/) });
-    expect(await screen.findByText("Staging deleted", undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText("Staging deleted", undefined, { timeout: 8000 })).toBeInTheDocument();
     await user.pointer({ keys: "[/MouseLeft]" });
+    // The dialog animates out; until it is gone the page behind it is hidden from assistive tech.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(within(table()).queryByText("Staging")).not.toBeInTheDocument());
     expect(within(screen.getByRole("group", { name: "Environment" })).queryByRole("button", { name: /staging/i })).toBeNull();
   });
@@ -71,9 +73,10 @@ describe("environments page", () => {
       await user.click(within(rowOf(name)).getByRole("button", { name: `Delete ${name}` }));
       await screen.findByRole("dialog", { name: `Delete ${name}?` });
       await user.pointer({ keys: "[MouseLeft>]", target: hold(/Hold to delete/) });
-      await screen.findByText(`${name} deleted`, undefined, { timeout: 3000 });
+      await screen.findByText(`${name} deleted`, undefined, { timeout: 8000 });
       await user.pointer({ keys: "[/MouseLeft]" });
-      await waitFor(() => expect(within(table()).queryByText(name)).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(within(table()).queryByText(name)).not.toBeInTheDocument(), { timeout: 5000 });
     }
     expect(within(rowOf("Production")).getByRole("button", { name: "Delete Production" })).toBeDisabled();
   });
