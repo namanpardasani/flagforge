@@ -82,6 +82,7 @@ Running log of decisions, tradeoffs, failure answers, and interview Q&A.
 | Production build of the server | esbuild bundles our own code and @flagforge/core into one dist/server.js; npm packages stay external and load from node_modules. Needed because workspace packages are TypeScript source, which Node cannot run from a dependency. Verified by starting the bundle with NODE_ENV=production and exercising auth, flags, SDK evaluation and CORS |
 | CORS allow-list | CORS_ORIGINS lists the exact browser origins allowed. Unset means any origin in development and NONE in production, so a forgotten setting fails closed. No credentials permission is sent (tokens travel in a header). CORS is not access control (routes still need a token or key); it stops other websites from using a visitor's browser to call the API. Entries are validated at startup (must be an origin: no path, no trailing slash, no wildcard) |
 | CI | GitHub Actions on every push and pull request: typecheck, lint, tests and builds for all five packages, against the same PostgreSQL 17 and Redis 7 images as development |
+| Server-side evaluation shares the config cache | /sdk/v1/evaluate and /evaluate-all use the same cached JSON as /sdk/v1/flags, parsed once per environment and reused while the ETag is unchanged (bounded to 500 environments). They therefore answer exactly what a polling SDK would compute, with the same freshness rule (the cache refuses entries older than the announced version), and a warm environment costs no database query |
 | Role-based hiding | The UI hides or disables what the role cannot do (viewer: no toggles; non-admin: no audit request). That is convenience only. If the server answers 403 anyway (role changed since the page loaded), the optimistic change is rolled back and the server's reason is shown |
 | Rule editing vs the API's rule shape | The server stores rules with several AND-ed conditions and typed values; the form edits one condition as text. Extra conditions are shown read-only and saved back untouched. A value that was not edited is sent back exactly as received (so numbers and booleans keep their type); a value typed in the form is sent as text, a list for "one of", or a number for comparisons |
 | Web tests use a fake server, not mocked functions | apps/web/src/test/fake-server.ts speaks the real wire format (ids, error bodies, single-use refresh tokens, SSE) and is plugged in as the client's fetch. The tests therefore run the real client, adapters, hooks and stream code |
@@ -94,6 +95,39 @@ Running log of decisions, tradeoffs, failure answers, and interview Q&A.
 | Render (backend) | 750 instance hours/month per workspace, sleeps after 15 min idle, cold start ~15s or longer | SSE drops on sleep; SDK must reconnect and resync; warm up before demos; keep a video |
 | Vercel (frontend) | Hobby: 100 GB transfer, 1M edge requests, non-commercial only | Fine for a portfolio project |
 | Fly.io | 7-day trial, then card required | Dropped |
+
+## Load test results (2026-10-11)
+
+Real runs, one laptop: Intel i7-1165G7 (8 threads), 7 GB RAM, WSL2. Server = the production bundle
+in production mode, one process, rate limiting off, local Redis and PostgreSQL in Docker. Load
+generator = `loadtest/node-load.mjs` on the SAME machine, fixed request rate, latency counted from
+when each request was due (so queueing is included). 20 flags.
+**The k6 script (`loadtest/flagforge.js`) has not been run: k6 could not be downloaded on this
+network.** These numbers describe this laptop, not a hosted deployment.
+
+| Scenario | Target rate | Achieved | Failed | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|
+| SDK poll, `GET /sdk/v1/flags` answering 304 | 200/s | 200/s | 0 | 8.1 ms | 9.8 ms | 10.8 ms |
+| SDK evaluate, `POST /sdk/v1/evaluate` | 200/s | 200/s | 0 | 8.4 ms | 10.2 ms | 11.5 ms |
+| Dashboard flag list | 200/s | 200/s | 0 | 12.9 ms | 39.3 ms | 155 ms |
+| SDK poll | 1000/s | 1000/s | 0 | 4.0 ms | 7.6 ms | 12 ms |
+| SDK evaluate | 1000/s | 1000/s | 0 | 5.4 ms | 24.8 ms | 93 ms |
+| Dashboard flag list | 1000/s | **342/s** | 0 | saturated | saturated | saturated |
+
+What the runs showed:
+
+- **The poll path is cheap**, as designed: a warmed environment is served from Redis with no
+  database query, and held 1000 requests a second.
+- **Server-side evaluation was reading PostgreSQL on every call.** Before the fix it saturated at
+  about 880/s with a p95 of 2.1 s at a 1000/s target. It now evaluates against the same cached
+  configuration the poll endpoint serves (parsed once per ETag), and holds 1000/s with a p95 of
+  25 ms. Found by this load test, not by reading the code.
+- **The dashboard flag list is bound by the database**: about 340 requests a second on this machine
+  (membership check, project check, flags and environments are four queries per request). That is
+  far more than people clicking can produce, so it is left uncached on purpose: the dashboard must
+  always show what the database says.
+- The poll being faster at 1000/s than at 200/s is real, not an error: at higher rates connections
+  and the event loop stay warm.
 
 ## What happens if X fails (fill in as we build)
 - Postgres down:

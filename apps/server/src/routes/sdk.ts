@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { evaluateFlag } from "@flagforge/core";
+import { evaluateFlag, type FlagConfig } from "@flagforge/core";
 import { Router, type Request, type Response } from "express";
 import type { PrismaClient } from "../../generated/prisma/client.js";
 import { AppError } from "../errors.js";
@@ -11,7 +11,7 @@ import type { KeyCache } from "../redis/key-cache.js";
 import type { RateLimiter } from "../redis/rate-limit.js";
 import type { StreamManager } from "../realtime/streams.js";
 import { validate } from "../middleware/validate.js";
-import { loadFlagConfig, loadFlagConfigs } from "../sdk/configs.js";
+import { loadFlagConfigs } from "../sdk/configs.js";
 import { evaluateAllSchema, evaluateSchema } from "../sdk/schemas.js";
 
 /**
@@ -58,29 +58,58 @@ export function sdkRouter(prisma: PrismaClient, { streams, keyCache, configCache
   const perKey = (name: string, rule: RateLimits["sdkFlags"]) =>
     rateLimit(limiter, { name, rule, key: (req) => req.sdk?.apiKeyId });
 
-  // The full configuration, so an SDK can cache it and evaluate locally with @flagforge/core.
-  router.get("/sdk/v1/flags", perIp, apiKey, perKey("sdk-flags", limits.sdkFlags), async (req, res) => {
-    const { environmentId, environmentKey, workspaceId } = req.sdk!;
-
-    // Cache hit: no database work at all. The cache only returns entries that are still current.
-    const cached = await configCache.get(environmentId);
-    if (cached) return sendWithEtag(req, res, cached.body, cached.etag);
+  /**
+   * The environment's whole configuration as the JSON the SDK downloads, plus its ETag.
+   * Cache hit: no database work at all (the cache only returns entries that are still current).
+   * Miss: read from PostgreSQL and offer the result to the cache.
+   */
+  async function currentConfig(sdk: NonNullable<Request["sdk"]>): Promise<{ body: string; etag: string }> {
+    const cached = await configCache.get(sdk.environmentId);
+    if (cached) return cached;
     // Read the version BEFORE the flags. If a change lands in between, the flags are newer than the
     // version we report, so the SDK just refetches once more. Reading in the other order could label
     // old flags with a new version, and the SDK would then never fetch the change.
     const env = await prisma.environment.findFirst({
-      where: { id: environmentId, workspaceId },
+      where: { id: sdk.environmentId, workspaceId: sdk.workspaceId },
       select: { configVersion: true },
     });
     if (!env) throw new AppError(401, "INVALID_API_KEY", "Missing, invalid or revoked API key");
     const body = JSON.stringify({
-      environment: { id: environmentId, key: environmentKey },
+      environment: { id: sdk.environmentId, key: sdk.environmentKey },
       version: env.configVersion,
-      flags: await loadFlagConfigs(prisma, req.sdk!),
+      flags: await loadFlagConfigs(prisma, sdk),
     });
     const etag = etagOf(body);
     // The cache refuses this write if a newer version was announced while we were reading.
-    await configCache.put(environmentId, { version: env.configVersion, etag, body });
+    await configCache.put(sdk.environmentId, { version: env.configVersion, etag, body });
+    return { body, etag };
+  }
+
+  // Parsing the JSON on every evaluation would waste CPU, so the parsed form is kept per
+  // environment and reused for as long as the ETag (a hash of the content) stays the same.
+  // Bounded so a server with very many environments cannot grow this without limit.
+  const PARSED_LIMIT = 500;
+  const parsed = new Map<string, { etag: string; flags: Map<string, FlagConfig> }>();
+
+  /**
+   * The flags to evaluate against, from the SAME source as GET /sdk/v1/flags. Server-side
+   * evaluation therefore answers exactly what a polling SDK would compute, with the same
+   * freshness, and a warmed environment costs no database query per evaluation.
+   */
+  async function flagsFor(sdk: NonNullable<Request["sdk"]>): Promise<Map<string, FlagConfig>> {
+    const { body, etag } = await currentConfig(sdk);
+    const known = parsed.get(sdk.environmentId);
+    if (known?.etag === etag) return known.flags;
+    const flags = new Map((JSON.parse(body) as { flags: FlagConfig[] }).flags.map((flag) => [flag.key, flag]));
+    parsed.delete(sdk.environmentId); // re-insert at the end: the Map then drops the least recently refreshed first
+    parsed.set(sdk.environmentId, { etag, flags });
+    if (parsed.size > PARSED_LIMIT) parsed.delete(parsed.keys().next().value!);
+    return flags;
+  }
+
+  // The full configuration, so an SDK can cache it and evaluate locally with @flagforge/core.
+  router.get("/sdk/v1/flags", perIp, apiKey, perKey("sdk-flags", limits.sdkFlags), async (req, res) => {
+    const { body, etag } = await currentConfig(req.sdk!);
     sendWithEtag(req, res, body, etag);
   });
 
@@ -89,14 +118,13 @@ export function sdkRouter(prisma: PrismaClient, { streams, keyCache, configCache
 
   // Server-side evaluation of one flag, for clients that do not want to run the engine themselves.
   router.post("/sdk/v1/evaluate", perIp, apiKey, perKey("sdk-evaluate", limits.sdkEvaluate), validate(evaluateSchema), async (req, res) => {
-    const config = await loadFlagConfig(prisma, req.sdk!, req.body.flagKey);
+    const config = (await flagsFor(req.sdk!)).get(req.body.flagKey);
     if (!config) throw new AppError(404, "FLAG_NOT_FOUND", "Flag not found");
     res.json({ flagKey: config.key, ...evaluateFlag(config, req.body.context) });
   });
 
   router.post("/sdk/v1/evaluate-all", perIp, apiKey, perKey("sdk-evaluate", limits.sdkEvaluate), validate(evaluateAllSchema), async (req, res) => {
-    const configs = await loadFlagConfigs(prisma, req.sdk!);
-    const flags = Object.fromEntries(configs.map((c) => [c.key, evaluateFlag(c, req.body.context)]));
+    const flags = Object.fromEntries([...(await flagsFor(req.sdk!)).values()].map((c) => [c.key, evaluateFlag(c, req.body.context)]));
     res.json({ flags });
   });
 

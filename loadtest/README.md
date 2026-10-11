@@ -31,6 +31,16 @@ k6 run loadtest/flagforge.js                       # 200 requests/second per sce
 k6 run -e RATE=1000 -e DURATION=30s loadtest/flagforge.js
 ```
 
+### Without k6
+
+`node-load.mjs` runs the same three scenarios with no dependencies, for machines where k6 cannot be
+installed. It sends at a fixed rate and counts latency from when each request was due.
+
+```bash
+BASE_URL=http://localhost:3000 node loadtest/node-load.mjs
+BASE_URL=http://localhost:3000 RATE=1000 DURATION=15 node loadtest/node-load.mjs
+```
+
 `setup()` creates its own account, workspace, 20 flags and an API key through the public API, so
 nothing needs preparing. It leaves a `load-...` workspace behind in the local database.
 
@@ -40,4 +50,4 @@ more than 1% of requests fail, or if k6 could not keep up the requested rate.
 ## Results
 
 See "Load test results" in [NOTES.md](../NOTES.md). Numbers there are from real runs, with the
-machine and settings stated. They describe one laptop, not a production deployment.
+machine and settings stated. They describe one laptop, not a production deployment. So far they come from `node-load.mjs`; the k6 script has not been run yet.

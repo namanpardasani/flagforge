@@ -40,10 +40,3 @@ export async function loadFlagConfigs(prisma: PrismaClient, scope: Scope): Promi
   return rows.map(toConfig);
 }
 
-export async function loadFlagConfig(prisma: PrismaClient, scope: Scope, flagKey: string): Promise<FlagConfig | null> {
-  const row = await prisma.flag.findFirst({
-    where: { workspaceId: scope.workspaceId, projectId: scope.projectId, key: flagKey },
-    select: select(scope.environmentId),
-  });
-  return row ? toConfig(row) : null;
-}

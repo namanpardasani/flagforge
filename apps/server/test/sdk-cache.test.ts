@@ -47,6 +47,56 @@ beforeEach(async () => {
   devKey = (await mkKey(devId)).key;
 });
 
+describe("server-side evaluation uses the same cached configuration", () => {
+  const evaluate = (key: string, userKey = "u1") => request(app).post("/sdk/v1/evaluate").set("Authorization", `Bearer ${key}`).send({ flagKey: "checkout", context: { key: userKey } });
+  const evaluateAll = (key: string) => request(app).post("/sdk/v1/evaluate-all").set("Authorization", `Bearer ${key}`).send({ context: { key: "u1" } });
+
+  it("costs ZERO database queries once the environment is warm", async () => {
+    expect((await evaluate(devKey)).status).toBe(200); // warms key cache and config cache
+    const spies = dbCalls();
+    const singleFlagLookups = vi.spyOn(prisma.flag, "findFirst");
+    for (let i = 0; i < 5; i++) expect((await evaluate(devKey, `user-${i}`)).status).toBe(200);
+    expect((await evaluateAll(devKey)).status).toBe(200);
+    expect(totalCalls(spies) + singleFlagLookups.mock.calls.length).toBe(0);
+  });
+
+  it("answers with a change the moment it has been made (never a stale cached answer)", async () => {
+    expect((await evaluate(devKey)).body).toMatchObject({ value: false, reason: "OFF" });
+    await configure(devId, { enabled: true });
+    expect((await evaluate(devKey)).body).toMatchObject({ value: true, reason: "FALLTHROUGH" });
+    await configure(devId, { enabled: false });
+    expect((await evaluate(devKey)).body).toMatchObject({ value: false, reason: "OFF" });
+    expect((await evaluateAll(devKey)).body.flags.checkout).toMatchObject({ value: false });
+  });
+
+  it("keeps environments apart: a flag on in dev is not on for a prod key", async () => {
+    const prodKey = (await mkKey(prodId)).key;
+    await configure(devId, { enabled: true });
+    // Warm both, in both orders, so a shared cache entry would show up.
+    for (let i = 0; i < 2; i++) {
+      expect((await evaluate(devKey)).body.value).toBe(true);
+      expect((await evaluate(prodKey)).body.value).toBe(false);
+    }
+  });
+
+  it("agrees with what an SDK computes locally from the downloaded configuration", async () => {
+    await configure(devId, { enabled: true, rolloutPercentage: 50 });
+    const { evaluateFlag } = await import("@flagforge/core");
+    const config = (await sdkFlags()).body.flags[0];
+    for (let i = 0; i < 40; i++) {
+      const local = evaluateFlag(config, { key: `user-${i}` });
+      expect((await evaluate(devKey, `user-${i}`)).body).toMatchObject({ value: local.value, reason: local.reason });
+    }
+  });
+
+  it("reports an unknown flag as 404, and picks up a flag created afterwards", async () => {
+    const unknown = () => request(app).post("/sdk/v1/evaluate").set("Authorization", `Bearer ${devKey}`).send({ flagKey: "brand-new", context: { key: "u1" } });
+    expect((await unknown()).status).toBe(404);
+    await api("post", `/workspaces/${wsId}/projects/${projectId}/flags`, { key: "brand-new", name: "N" });
+    expect((await unknown()).status).toBe(200);
+  });
+});
+
 describe("config cache", () => {
   it("serves repeat polls with ZERO database queries", async () => {
     expect((await sdkFlags()).status).toBe(200); // warms key cache and config cache
