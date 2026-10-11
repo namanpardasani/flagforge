@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { fromRule } from "@/api/adapters";
-import { createApiKey, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
+import { addMember, changeMemberRole, createApiKey, removeMember, createFlag, createProject, createWorkspace, fetchFlags, revokeApiKey, saveTargeting, setFlagEnabled } from "@/api/endpoints";
 import { connectProjectStream } from "@/api/stream";
-import { envName, stateOf, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
+import { envName, stateOf, type Role, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
 import { flash, type FlashKind } from "@/stores/flash";
 import { setLiveStatus } from "@/stores/live";
 import { toast } from "@/stores/toasts";
@@ -139,6 +139,33 @@ export function useRevokeApiKey(project: Project | undefined, environmentId: str
     onError: (error) => toast("Could not revoke the key", { detail: error.message, tone: "danger" }),
     onSettled: () => client.invalidateQueries({ queryKey: queryKeys.apiKeys(environmentId ?? "none") }),
   });
+}
+
+// ---- members -------------------------------------------------------------------------------------
+
+/**
+ * Member changes wait for the server. They are about who may do what, so showing a change that
+ * the server then refuses (an admin demoting someone they may not) would be misleading.
+ */
+export function useMemberMutations(workspaceId: string | undefined) {
+  const client = useQueryClient();
+  const refresh = () => client.invalidateQueries({ queryKey: queryKeys.members(workspaceId ?? "none") });
+  const failed = (title: string) => (error: Error) => toast(title, { detail: error.message, tone: "danger" });
+  return {
+    add: useMutation({ mutationFn: (input: { email: string; role: Role }) => addMember(workspaceId!, input), onSuccess: (m) => toast(`${m.name} added`, { detail: `As ${m.role.toLowerCase()}.` }), onSettled: refresh }),
+    changeRole: useMutation({
+      mutationFn: (input: { userId: string; role: Role }) => changeMemberRole(workspaceId!, input.userId, input.role),
+      onSuccess: (m) => toast(`${m.name} is now ${m.role.toLowerCase()}`),
+      onError: failed("Could not change the role"),
+      onSettled: refresh,
+    }),
+    remove: useMutation({
+      mutationFn: (input: { userId: string; name: string }) => removeMember(workspaceId!, input.userId),
+      onSuccess: (_, input) => toast(`${input.name} removed`),
+      onError: failed("Could not remove the member"),
+      onSettled: refresh,
+    }),
+  };
 }
 
 // ---- live updates --------------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { paths, useScope } from "@/components/shell/use-scope";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ApiKeysPage } from "./ApiKeys";
 import { FlagsPage } from "./Flags";
+import { MembersPage } from "./Members";
 import { OverviewPage } from "./Overview";
 
 /** Picks the screen for "/w/:workspaceSlug/p/:projectKey/:page". */
@@ -13,6 +14,7 @@ export function ProjectPage() {
   if (page === "overview") return <OverviewPage />;
   if (page === "flags") return <FlagsPage />;
   if (page === "api-keys") return <ApiKeysPage />;
+  if (page === "members") return <MembersPage />;
 
   const item = ALL_NAV_ITEMS.find((i) => i.page === page);
   return item ? <NotBuiltYet label={item.label} /> : <NotFound />;

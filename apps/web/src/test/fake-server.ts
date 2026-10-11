@@ -122,6 +122,7 @@ export function createFakeServer() {
   let remoteTurn = 0;
   let calls: Array<{ method: string; path: string; authorization: string | null }> = [];
   let inFlight = 0;
+  let members: Array<{ workspaceId: string; userId: string; name: string; email: string; role: Role; joinedAt: string }> = [];
   let apiKeys: Array<{ id: string; environmentId: string; name: string; prefix: string; createdAt: string; revokedAt: string | null }> = [];
 
   const token = (kind: string) => `${kind}_${++sequence}_${Math.random().toString(36).slice(2, 8)}`;
@@ -130,6 +131,10 @@ export function createFakeServer() {
   function reset() {
     for (const stream of [...streams]) stream.close();
     flags = FLAGS.map(wireFlag);
+    members = [
+      { workspaceId: "ws_halden", userId: "u_jonas", name: "Jonas Reyes", email: "jonas@halden.example", role: "ADMIN", joinedAt: "2026-02-01T00:00:00Z" },
+      { workspaceId: "ws_halden", userId: "u_tove", name: "Tove Lind", email: "tove@halden.example", role: "MEMBER", joinedAt: "2026-03-01T00:00:00Z" },
+    ];
     apiKeys = [{ id: "key_seed", environmentId: envId("pr_dispatch", "prod"), name: "Checkout service", prefix: "ff_Qm2xK8v", createdAt: "2026-10-08T09:02:00Z", revokedAt: null }];
     audit = seedAudit();
     roles = Object.fromEntries(WORKSPACES.map((w) => [w.id, w.role]));
@@ -257,6 +262,55 @@ export function createFakeServer() {
     if (!ws || !role) return fail(404, "WORKSPACE_NOT_FOUND", "Workspace not found");
     const need = (minimum: Role) => (ORDER.indexOf(role) >= ORDER.indexOf(minimum) ? null : fail(403, "FORBIDDEN", `This action requires the ${minimum} role or higher`));
     const rest = (match[2] ?? "").split("?")[0]!;
+
+    // Members: the signed-in user is always listed, with the role the test gave them.
+    const listMembers = () =>
+      [{ workspaceId: ws.id, userId: TEST_USER.id, name: TEST_USER.name, email: TEST_USER.email, role, joinedAt: "2026-01-01T00:00:00Z" }, ...members.filter((m) => m.workspaceId === ws.id)].map((m) => ({
+        userId: m.userId,
+        role: m.role,
+        joinedAt: m.joinedAt,
+        user: { email: m.email, name: m.name },
+      }));
+    const forbid = (message: string) => fail(403, "FORBIDDEN", message);
+    if (rest === "/members" && method === "GET") return json(200, { members: listMembers() });
+    if (rest === "/members" && method === "POST") {
+      const denied = need("ADMIN");
+      if (denied) return denied;
+      const email = String(body?.["email"]);
+      const newRole = String(body?.["role"]) as Role;
+      if (newRole === "ADMIN" && role !== "OWNER") return forbid("Only the owner can add admins");
+      const person = [{ id: "u_nils", name: "Nils Berg", email: "nils@halden.example" }].find((u) => u.email === email);
+      if (!person) return fail(404, "USER_NOT_FOUND", "No user with this email");
+      if (email === TEST_USER.email || members.some((m) => m.workspaceId === ws.id && m.email === email)) return fail(409, "ALREADY_MEMBER", "This user is already a member");
+      const added = { workspaceId: ws.id, userId: person.id, name: person.name, email, role: newRole, joinedAt: now() };
+      members.push(added);
+      return json(201, { userId: added.userId, role: added.role, joinedAt: added.joinedAt, user: { email, name: added.name } });
+    }
+    const memberRoute = /^\/members\/([^/]+)$/.exec(rest);
+    if (memberRoute) {
+      const targetId = memberRoute[1]!;
+      const target = listMembers().find((m) => m.userId === targetId);
+      if (!target) return fail(404, "MEMBER_NOT_FOUND", "Member not found");
+      if (method === "PATCH") {
+        const denied = need("ADMIN");
+        if (denied) return denied;
+        const newRole = String(body?.["role"]) as Role;
+        if (targetId === TEST_USER.id) return forbid("You cannot change your own role");
+        if (target.role === "OWNER") return forbid("The owner's role cannot be changed");
+        if ((target.role === "ADMIN" || newRole === "ADMIN") && role !== "OWNER") return forbid("Only the owner can grant or revoke admin");
+        members.find((m) => m.userId === targetId)!.role = newRole;
+        return json(200, { ...target, role: newRole });
+      }
+      if (method === "DELETE") {
+        if (target.role === "OWNER") return forbid("The owner cannot be removed");
+        const leaving = targetId === TEST_USER.id;
+        if (!leaving && ORDER.indexOf(role) < ORDER.indexOf("ADMIN")) return forbid("Insufficient role");
+        if (!leaving && target.role === "ADMIN" && role !== "OWNER") return forbid("Only the owner can remove admins");
+        if (leaving) delete roles[ws.id];
+        else members = members.filter((m) => !(m.workspaceId === ws.id && m.userId === targetId));
+        return new Response(null, { status: 204 });
+      }
+    }
 
     if (rest === "/projects" && method === "GET") return json(200, { projects: PROJECTS.filter((p) => p.workspaceSlug === ws.slug).map(project) });
     if (rest === "/audit-log" && method === "GET") return need("ADMIN") ?? json(200, { entries: audit });

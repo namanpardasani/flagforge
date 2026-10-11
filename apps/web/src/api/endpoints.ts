@@ -1,6 +1,6 @@
-import { apiKeysSchema, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
+import { apiKeysSchema, memberSchema, membersSchema, toMember, auditSchema, createdApiKeySchema, toApiKey, flagSchema, flagsSchema, fromRule, projectSchema, projectsSchema, toActivity, toFlag, toProject, toWorkspace, workspaceSchema, workspacesSchema } from "./adapters";
 import { request } from "./client";
-import type { Activity, ApiKey, Flag, Project, Targeting, Workspace } from "./types";
+import type { Activity, ApiKey, Flag, Member, Role, Project, Targeting, Workspace } from "./types";
 
 /** One function per server route the dashboard uses. Each returns the app's own types. */
 
@@ -56,3 +56,13 @@ export const createApiKey = async (project: Project, environmentId: string, name
 
 export const revokeApiKey = (project: Project, environmentId: string, apiKeyId: string): Promise<void> =>
   request("DELETE", `${keysPath(project, environmentId)}/${apiKeyId}`);
+
+export const fetchMembers = async (workspaceId: string): Promise<Member[]> => (await request("GET", `/workspaces/${workspaceId}/members`, { schema: membersSchema })).members.map(toMember);
+
+export const addMember = async (workspaceId: string, input: { email: string; role: Role }): Promise<Member> =>
+  toMember(await request("POST", `/workspaces/${workspaceId}/members`, { body: input, schema: memberSchema }));
+
+export const changeMemberRole = async (workspaceId: string, userId: string, role: Role): Promise<Member> =>
+  toMember(await request("PATCH", `/workspaces/${workspaceId}/members/${userId}`, { body: { role }, schema: memberSchema }));
+
+export const removeMember = (workspaceId: string, userId: string): Promise<void> => request("DELETE", `/workspaces/${workspaceId}/members/${userId}`);

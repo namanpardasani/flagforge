@@ -100,6 +100,36 @@ export interface ApiKey {
   revokedAt: string | null;
 }
 
+export interface Member {
+  userId: string;
+  name: string;
+  email: string;
+  role: Role;
+  joinedAt: string;
+}
+
+/** Roles that can be handed out. Owner is never assignable: ownership cannot be transferred yet. */
+export const ASSIGNABLE_ROLES = ["ADMIN", "MEMBER", "VIEWER"] as const satisfies readonly Role[];
+
+/**
+ * What one person may do to another member. This MIRRORS the server's rules so the page can offer
+ * only what will work; the server still checks every request, and its answer is what counts.
+ */
+export function memberActions(actor: { id: string; role: Role | undefined }, target: Member) {
+  const isSelf = actor.id === target.userId;
+  const isOwner = actor.role === "OWNER";
+  const isAdmin = actor.role === "ADMIN" || isOwner;
+  const targetFixed = target.role === "OWNER";
+  const changeRole = !isSelf && !targetFixed && isAdmin && (isOwner || target.role !== "ADMIN");
+  return {
+    isSelf,
+    /** Roles this person may be given by the actor (empty when the role cannot be changed). */
+    roles: changeRole ? ASSIGNABLE_ROLES.filter((role) => isOwner || role !== "ADMIN") : [],
+    canRemove: !targetFixed && !isSelf && isAdmin && (isOwner || target.role !== "ADMIN"),
+    canLeave: isSelf && !targetFixed,
+  };
+}
+
 export type Targeting = Pick<FlagState, "rolloutPercentage" | "rules">;
 
 const OFF: FlagState = { enabled: false, rolloutPercentage: 100, rules: [] };
@@ -123,6 +153,7 @@ export const can = {
   readAuditLog: (role: Role | undefined) => hasRole(role, "ADMIN"),
   createProjects: (role: Role | undefined) => hasRole(role, "ADMIN"),
   manageKeys: (role: Role | undefined) => hasRole(role, "ADMIN"),
+  manageMembers: (role: Role | undefined) => hasRole(role, "ADMIN"),
 };
 
 // Environment names for display. Filled in as projects load (see adapters.ts), so a component can
