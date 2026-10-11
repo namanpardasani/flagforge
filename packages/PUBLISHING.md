@@ -13,8 +13,9 @@ been published.
 1. **The name.** `@flagforge/...` needs an npm organisation called `flagforge` that you own. If it
    is taken, rename both packages (for example `@your-username/flagforge-sdk`) and update the
    imports.
-2. **A licence.** Neither package declares one yet. Add a `LICENSE` file at the repository root and
-   a `"license"` field to both `package.json` files. Without it, nobody is formally allowed to use them.
+2. **The licence is done.** The repository is MIT-licensed (`LICENSE` at the root) and both packages
+   say `"license": "MIT"`. npm shows the licence from that field, and each package folder holds its own copy of
+   `LICENSE` so it travels inside the tarball.
 3. **Remove `"private": true`** from both `package.json` files. It is there so nothing can be
    published by accident.
 

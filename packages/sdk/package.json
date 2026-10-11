@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "FlagForge server-side SDK: local evaluation, polling, offline fallback",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

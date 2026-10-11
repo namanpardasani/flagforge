@@ -156,3 +156,7 @@ CI runs all of them, plus typechecking, linting and a production build, on every
   never switches them off.
 - Known limitations and what would be done before real users are listed under "Open items" in
   [NOTES.md](NOTES.md).
+
+## Licence
+
+[MIT](LICENSE). Use it, learn from it, build on it.

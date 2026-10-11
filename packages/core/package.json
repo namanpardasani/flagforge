@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Pure flag evaluation logic shared by the server and the SDKs",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
