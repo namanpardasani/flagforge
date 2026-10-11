@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { Flag } from "@/mocks/data";
+import type { Flag } from "@/api/types";
 
 /**
  * Turn a flag on or off in the current environment, through the Production safety check.

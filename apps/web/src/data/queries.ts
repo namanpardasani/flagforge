@@ -1,5 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { fetchActivity, fetchFlags, fetchProjects, fetchWorkspaces } from "@/mocks/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchActivity, fetchFlags, fetchProjects, fetchWorkspaces } from "@/api/endpoints";
+import { useSession } from "@/api/session";
+import { can, type Project, type Role } from "@/api/types";
+import { useLiveStatus } from "@/stores/live";
 
 /**
  * Data hooks. Components call these and never know where the data comes from.
@@ -7,20 +10,46 @@ import { fetchActivity, fetchFlags, fetchProjects, fetchWorkspaces } from "@/moc
  * TanStack Query in one line: you give it a key (a name for the data) and a function that fetches
  * it; it handles loading and error states, caches the result, and shares it between every
  * component that asks for the same key.
+ *
+ * Keys use server ids, so two projects with the same key in different workspaces never share data.
  */
 export const queryKeys = {
   workspaces: ["workspaces"] as const,
-  projects: (workspaceSlug: string) => ["projects", workspaceSlug] as const,
-  flags: (projectKey: string) => ["flags", projectKey] as const,
-  activity: (projectKey: string) => ["activity", projectKey] as const,
+  projects: (workspaceId: string) => ["projects", workspaceId] as const,
+  flags: (projectId: string) => ["flags", projectId] as const,
+  activity: (projectId: string) => ["activity", projectId] as const,
 };
 
-export const useWorkspaces = () => useQuery({ queryKey: queryKeys.workspaces, queryFn: fetchWorkspaces });
+/** How often to refetch flags while the live stream is not delivering. */
+const FALLBACK_POLL_MS = 15_000;
 
-export const useProjects = (workspaceSlug: string) =>
-  useQuery({ queryKey: queryKeys.projects(workspaceSlug), queryFn: () => fetchProjects(workspaceSlug) });
+export function useWorkspaces() {
+  const signedIn = useSession().status === "signedIn";
+  return useQuery({ queryKey: queryKeys.workspaces, queryFn: fetchWorkspaces, enabled: signedIn });
+}
 
-export const useFlags = (projectKey: string) => useQuery({ queryKey: queryKeys.flags(projectKey), queryFn: () => fetchFlags(projectKey) });
+export const useProjects = (workspaceId: string | undefined) =>
+  useQuery({ queryKey: queryKeys.projects(workspaceId ?? "none"), queryFn: () => fetchProjects(workspaceId!), enabled: workspaceId !== undefined });
 
-export const useActivity = (projectKey: string) =>
-  useQuery({ queryKey: queryKeys.activity(projectKey), queryFn: () => fetchActivity(projectKey) });
+export function useFlags(project: Project | undefined) {
+  const live = useLiveStatus();
+  return useQuery({
+    queryKey: queryKeys.flags(project?.id ?? "none"),
+    queryFn: () => fetchFlags(project!),
+    enabled: project !== undefined,
+    refetchInterval: live === "live" ? false : FALLBACK_POLL_MS,
+  });
+}
+
+/**
+ * Recent changes to this project's flags, from the audit log. The server only lets admins read
+ * it, so for anyone else the request is not even sent (and if it were, the 403 is shown kindly).
+ */
+export function useActivity(project: Project | undefined, role: Role | undefined) {
+  const client = useQueryClient();
+  return useQuery({
+    queryKey: queryKeys.activity(project?.id ?? "none"),
+    queryFn: async () => fetchActivity(project!, await client.ensureQueryData({ queryKey: queryKeys.flags(project!.id), queryFn: () => fetchFlags(project!) })),
+    enabled: project !== undefined && can.readAuditLog(role),
+  });
+}

@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { CornerDownLeft, Flag as FlagIcon, PanelLeft, Power, Radio, Search } from "lucide-react";
+import { CornerDownLeft, Flag as FlagIcon, PanelLeft, Power, Search } from "lucide-react";
 import { Dialog } from "radix-ui";
 import type { ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -9,8 +9,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { useGuardedToggle } from "@/components/flags/use-flag-guard";
 import { useFlags } from "@/data/queries";
 import { fuzzyScore } from "@/lib/fuzzy";
-import { simulateRemoteChange } from "@/mocks/api";
-import { ENVIRONMENTS, envName } from "@/mocks/data";
+import { can, envName, isProduction, stateOf } from "@/api/types";
 import { ALL_NAV_ITEMS } from "./nav";
 import { useShell } from "./use-shell";
 import { paths, useScope } from "./use-scope";
@@ -51,7 +50,9 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const params = useParams();
   const page = params["page"] ?? (params["flagKey"] ? "flags" : "overview");
-  const flags = useFlags(scope.projectKey).data ?? [];
+  const flags = useFlags(scope.project).data ?? [];
+  const environments = scope.project?.environments ?? [];
+  const canEdit = can.editFlags(scope.role);
   const toggle = useGuardedToggle();
 
   /** Close first, then act, so focus is not stolen back by the closing dialog. */
@@ -96,7 +97,7 @@ export function CommandPalette() {
                       key={flag.id}
                       value={`flag ${flag.key}`}
                       keywords={[flag.name, flag.description]}
-                      hint={flag.states[env].enabled ? `on in ${env}` : `off in ${env}`}
+                      hint={stateOf(flag, env).enabled ? `on in ${env}` : `off in ${env}`}
                       onSelect={run(() => navigate(paths.flag(scope.workspaceSlug, scope.projectKey, flag.key)))}
                     >
                       <FlagIcon strokeWidth={1.5} />
@@ -106,16 +107,16 @@ export function CommandPalette() {
                 </Command.Group>
               )}
 
-              {flags.length > 0 && (
+              {flags.length > 0 && canEdit && (
                 <Command.Group heading="Actions" className={groupClass}>
                   {flags.map((flag) => {
-                    const on = flag.states[env].enabled;
+                    const on = stateOf(flag, env).enabled;
                     return (
                       <Item
                         key={flag.id}
                         value={`turn ${on ? "off" : "on"} ${flag.key}`}
                         keywords={[flag.name, envName(env), on ? "kill disable stop" : "enable start launch"]}
-                        hint={env === "prod" ? "hold to confirm" : env}
+                        hint={isProduction(env) ? "hold to confirm" : env}
                         // In Production this opens the hold-to-confirm dialog rather than acting at once.
                         onSelect={run(() => toggle(flag, !on))}
                       >
@@ -126,12 +127,6 @@ export function CommandPalette() {
                       </Item>
                     );
                   })}
-                  {import.meta.env.DEV && (
-                    <Item value="simulate remote update" keywords={["dev", "live", "stream", "teammate"]} hint="dev" onSelect={run(() => void simulateRemoteChange(scope.projectKey, env))}>
-                      <Radio strokeWidth={1.5} />
-                      Simulate remote update
-                    </Item>
-                  )}
                 </Command.Group>
               )}
 
@@ -152,7 +147,7 @@ export function CommandPalette() {
               </Command.Group>
 
               <Command.Group heading="Environment" className={groupClass}>
-                {ENVIRONMENTS.map((environment) => (
+                {environments.map((environment) => (
                   <Item
                     key={environment.key}
                     value={`environment ${environment.name} ${environment.key}`}

@@ -14,7 +14,8 @@ import { Skeleton, SkeletonGroup } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { formatStamp } from "@/lib/format";
-import { FLAGS, type Flag } from "@/mocks/data";
+import { stateOf, type Flag } from "@/api/types";
+import { SAMPLE_FLAGS } from "./kit-samples";
 import { fadeUp, Reveal, RevealGroup, RevealItem, scaleIn, slideInRight } from "@/motion";
 
 const SWATCHES = [
@@ -34,8 +35,8 @@ const columns: readonly Column<Flag>[] = [
     header: "Prod",
     cell: (f) => (
       <span className="flex items-center gap-2 font-mono text-xs">
-        <LiveDot on={f.states.prod.enabled} />
-        {f.states.prod.enabled ? `${f.states.prod.rolloutPercentage}%` : "off"}
+        <LiveDot on={stateOf(f, "prod").enabled} />
+        {stateOf(f, "prod").enabled ? `${stateOf(f, "prod").rolloutPercentage}%` : "off"}
       </span>
     ),
   },
@@ -181,7 +182,7 @@ export function KitPage() {
         <TabsContent value="data" className="mt-8 space-y-10 outline-none">
           <Block fig="9.7" label="Data table with selection">
             <Frame>
-              <DataTable rows={FLAGS.filter((f) => f.projectKey === "dispatch-api")} columns={columns} label="Flags in Dispatch API" rowLabel={(f) => `flag ${f.key}`} />
+              <DataTable rows={SAMPLE_FLAGS} columns={columns} label="Sample flags" rowLabel={(f) => `flag ${f.key}`} />
             </Frame>
           </Block>
 

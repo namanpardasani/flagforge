@@ -1,4 +1,4 @@
-import { Blocks, Check, ChevronsUpDown, PanelsTopLeft, type LucideIcon } from "lucide-react";
+import { Blocks, Check, ChevronsUpDown, LogOut, PanelsTopLeft, type LucideIcon } from "lucide-react";
 import { LayoutGroup, motion } from "motion/react";
 import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
@@ -6,7 +6,8 @@ import { LiveDot } from "@/components/blueprint/marks";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
-import { CURRENT_USER, ENVIRONMENTS, type EnvKey } from "@/mocks/data";
+import { signOut, useSession } from "@/api/session";
+import type { EnvKey } from "@/api/types";
 import { spring } from "@/motion";
 import { NAV_GROUPS } from "./nav";
 import { useShell } from "./use-shell";
@@ -17,6 +18,7 @@ export const SIDEBAR_RAIL = 56;
 
 /** Three-letter codes for the rail, where there is no room for "staging". */
 const ENV_SHORT: Record<EnvKey, string> = { dev: "dev", staging: "stg", prod: "prd" };
+const shortEnv = (key: EnvKey) => ENV_SHORT[key] ?? key.slice(0, 3);
 
 /** Fades with the sidebar: visible when open, gone (and unclickable) when collapsed to the rail. */
 const whenOpen = "transition-opacity duration-150 ease-out-quart group-data-[collapsed=true]/sidebar:pointer-events-none group-data-[collapsed=true]/sidebar:opacity-0";
@@ -114,20 +116,46 @@ export function Sidebar() {
 
         <EnvSwitcher />
 
-        <div className="flex h-14 items-center gap-3 border-t border-hairline pl-[18px] pr-3">
-          <span aria-hidden className="flex size-5 shrink-0 items-center justify-center rounded-xs bg-ink font-mono text-[10px] font-medium text-canvas">
-            {CURRENT_USER.name
-              .split(" ")
-              .map((part) => part[0])
-              .join("")}
-          </span>
-          <div className={cn("min-w-0 leading-tight", whenOpen)}>
-            <p className="truncate text-sm text-ink">{CURRENT_USER.name}</p>
-            <p className="truncate font-mono text-2xs text-muted">{CURRENT_USER.email}</p>
-          </div>
-        </div>
+        <UserMenu />
       </motion.div>
     </motion.aside>
+  );
+}
+
+/** Who is signed in, and the way out. */
+function UserMenu() {
+  const session = useSession();
+  const { collapsed } = useShell();
+  const user = session.status === "signedIn" ? session.user : undefined;
+  const initials = (user?.name ?? "")
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <DropdownMenu>
+      <Tooltip label={user?.name ?? "Account"} enabled={collapsed}>
+        <DropdownMenuTrigger asChild>
+          <button aria-label={`Account: ${user?.name ?? "loading"}`} className="flex h-14 w-full shrink-0 items-center gap-3 border-t border-hairline pl-[18px] pr-3 text-left outline-offset-[-2px] hover:bg-raised">
+            <span aria-hidden className="flex size-5 shrink-0 items-center justify-center rounded-xs bg-ink font-mono text-[10px] font-medium text-canvas">
+              {initials}
+            </span>
+            <span className={cn("min-w-0 leading-tight", whenOpen)}>
+              <span className="block truncate text-sm text-ink">{user?.name ?? " "}</span>
+              <span className="block truncate font-mono text-2xs text-muted">{user?.email ?? " "}</span>
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent align="start" side="top" className="w-[232px]">
+        <DropdownMenuItem onSelect={() => void signOut()}>
+          <LogOut strokeWidth={1.5} />
+          <span className="flex-1">Sign out</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -232,18 +260,19 @@ export function Mark({ className }: { className?: string }) {
 
 function EnvSwitcher() {
   const { env, setEnv, collapsed } = useShell();
-  const next = (current: EnvKey): EnvKey => ENVIRONMENTS[(ENVIRONMENTS.findIndex((e) => e.key === current) + 1) % ENVIRONMENTS.length]!.key;
+  const environments = useScope().project?.environments ?? [];
+  const next = (current: EnvKey): EnvKey => environments[(environments.findIndex((e) => e.key === current) + 1) % Math.max(1, environments.length)]?.key ?? current;
 
   return (
     <div className="relative h-[68px] shrink-0 border-t border-hairline">
-      {/* Open: a three-way control. The raised marker is ONE element that slides to the chosen segment. */}
+      {/* Open: one segment per environment. The raised marker is ONE element that slides to the chosen segment. */}
       <div inert={collapsed} className={cn("absolute inset-0 px-3 pt-2.5", whenOpen)}>
         <p id="env-label" className="caption px-2 pb-1.5 text-faint">
           Environment
         </p>
         <LayoutGroup id="env-switcher">
-          <div role="group" aria-labelledby="env-label" className="grid grid-cols-3 rounded-sm border border-hairline bg-sunken p-0.5">
-            {ENVIRONMENTS.map((environment) => {
+          <div role="group" aria-labelledby="env-label" style={{ gridTemplateColumns: `repeat(${Math.max(1, environments.length)}, minmax(0, 1fr))` }} className="grid rounded-sm border border-hairline bg-sunken p-0.5">
+            {environments.map((environment) => {
               const active = environment.key === env;
               return (
                 <button
@@ -256,7 +285,7 @@ function EnvSwitcher() {
                 >
                   {active && <motion.span layoutId="env-marker" transition={spring.layout} className="absolute inset-0 rounded-xs border border-line-strong bg-raised" />}
                   {active && <LiveDot className="relative" />}
-                  <span className="relative">{environment.key}</span>
+                  <span className="relative truncate">{environment.key}</span>
                 </button>
               );
             })}
@@ -277,7 +306,7 @@ function EnvSwitcher() {
             className="flex h-9 w-10 flex-col items-center justify-center gap-1 rounded-xs border border-hairline bg-sunken font-mono text-[9px] uppercase tracking-[0.06em] text-ink hover:border-line-strong"
           >
             <LiveDot />
-            {ENV_SHORT[env]}
+            {shortEnv(env)}
           </button>
         </Tooltip>
       </div>

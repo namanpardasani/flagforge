@@ -1,8 +1,11 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
-import { saveTargeting, setFlagEnabled, subscribeToRemoteChanges, type TargetingPatch } from "@/mocks/api";
-import { envName, type EnvKey, type Flag } from "@/mocks/data";
+import { useEffect, useRef } from "react";
+import { fromRule } from "@/api/adapters";
+import { createFlag, createProject, createWorkspace, fetchFlags, saveTargeting, setFlagEnabled } from "@/api/endpoints";
+import { connectProjectStream } from "@/api/stream";
+import { envName, stateOf, type EnvKey, type Flag, type FlagState, type Project, type Targeting } from "@/api/types";
 import { flash, type FlashKind } from "@/stores/flash";
+import { setLiveStatus } from "@/stores/live";
 import { toast } from "@/stores/toasts";
 import { queryKeys } from "./queries";
 
@@ -18,23 +21,26 @@ import { queryKeys } from "./queries";
  *   onSettled - refetch, so the cache ends up matching the server whatever happened
  */
 
-function patchFlag(client: QueryClient, projectKey: string, flagId: string, update: (flag: Flag) => Flag) {
-  client.setQueryData<Flag[]>(queryKeys.flags(projectKey), (current) => current?.map((f) => (f.id === flagId ? update(f) : f)));
+/** Marks every flag write, so the live stream can tell "a write of ours is in flight". */
+const flagWrites = (projectId: string) => ["flag-write", projectId] as const;
+
+function patchFlag(client: QueryClient, projectId: string, flagId: string, update: (flag: Flag) => Flag) {
+  client.setQueryData<Flag[]>(queryKeys.flags(projectId), (current) => current?.map((f) => (f.id === flagId ? update(f) : f)));
 }
 
-async function begin(client: QueryClient, projectKey: string) {
-  await client.cancelQueries({ queryKey: queryKeys.flags(projectKey) });
-  return { previous: client.getQueryData<Flag[]>(queryKeys.flags(projectKey)) };
+async function begin(client: QueryClient, projectId: string) {
+  await client.cancelQueries({ queryKey: queryKeys.flags(projectId) });
+  return { previous: client.getQueryData<Flag[]>(queryKeys.flags(projectId)) };
 }
 
-function rollback(client: QueryClient, projectKey: string, context: { previous?: Flag[] } | undefined, flag: Flag, error: Error) {
-  if (context?.previous) client.setQueryData(queryKeys.flags(projectKey), context.previous);
-  toast(`Could not save ${flag.key}`, { detail: `${error.message}. Nothing was changed.`, tone: "danger" });
+function rollback(client: QueryClient, projectId: string, context: { previous?: Flag[] } | undefined, flag: Flag, error: Error) {
+  if (context?.previous) client.setQueryData(queryKeys.flags(projectId), context.previous);
+  toast(`Could not save ${flag.key}`, { detail: `${error.message.replace(/\.$/, "")}. Nothing was changed.`, tone: "danger" });
 }
 
-function settle(client: QueryClient, projectKey: string) {
-  void client.invalidateQueries({ queryKey: queryKeys.flags(projectKey) });
-  void client.invalidateQueries({ queryKey: queryKeys.activity(projectKey) });
+function settle(client: QueryClient, projectId: string) {
+  void client.invalidateQueries({ queryKey: queryKeys.flags(projectId) });
+  void client.invalidateQueries({ queryKey: queryKeys.activity(projectId) });
 }
 
 interface ToggleInput {
@@ -45,59 +51,161 @@ interface ToggleInput {
   kind?: FlashKind;
 }
 
-export function useSetFlagEnabled(projectKey: string) {
+export function useSetFlagEnabled(project: Project | undefined) {
   const client = useQueryClient();
+  const projectId = project?.id ?? "none";
   return useMutation({
-    mutationFn: ({ flag, env, enabled }: ToggleInput) => setFlagEnabled(flag.id, env, enabled),
+    mutationKey: flagWrites(projectId),
+    mutationFn: ({ flag, env, enabled }: ToggleInput) => setFlagEnabled(project!, flag.id, env, enabled),
     onMutate: async ({ flag, env, enabled, kind }) => {
-      const context = await begin(client, projectKey);
-      patchFlag(client, projectKey, flag.id, (f) => ({ ...f, states: { ...f.states, [env]: { ...f.states[env], enabled } } }));
+      const context = await begin(client, projectId);
+      patchFlag(client, projectId, flag.id, (f) => ({ ...f, states: { ...f.states, [env]: { ...stateOf(f, env), enabled } } }));
       flash(flag.id, kind ?? "local");
       toast(`${flag.key} turned ${enabled ? "on" : "off"}`, { detail: envName(env), tone: enabled ? "live" : kind === "kill" ? "danger" : "neutral" });
       return context;
     },
-    onError: (error, { flag }, context) => rollback(client, projectKey, context, flag, error),
-    onSettled: () => settle(client, projectKey),
+    onError: (error, { flag }, context) => rollback(client, projectId, context, flag, error),
+    onSettled: () => settle(client, projectId),
   });
 }
 
 interface TargetingInput {
   flag: Flag;
   env: EnvKey;
-  patch: TargetingPatch;
+  patch: Targeting;
 }
 
-export function useSaveTargeting(projectKey: string) {
+export function useSaveTargeting(project: Project | undefined) {
   const client = useQueryClient();
+  const projectId = project?.id ?? "none";
   return useMutation({
-    mutationFn: ({ flag, env, patch }: TargetingInput) => saveTargeting(flag.id, env, patch),
+    mutationKey: flagWrites(projectId),
+    mutationFn: ({ flag, env, patch }: TargetingInput) => saveTargeting(project!, flag.id, env, patch),
     onMutate: async ({ flag, env, patch }) => {
-      const context = await begin(client, projectKey);
-      patchFlag(client, projectKey, flag.id, (f) => ({ ...f, states: { ...f.states, [env]: { ...f.states[env], ...patch } } }));
+      const context = await begin(client, projectId);
+      patchFlag(client, projectId, flag.id, (f) => ({ ...f, states: { ...f.states, [env]: { ...stateOf(f, env), ...patch } } }));
       flash(flag.id, "local");
       toast(`Targeting saved for ${flag.key}`, { detail: `${envName(env)}: ${patch.rolloutPercentage}% rollout, ${patch.rules.length} ${patch.rules.length === 1 ? "rule" : "rules"}` });
       return context;
     },
-    onError: (error, { flag }, context) => rollback(client, projectKey, context, flag, error),
-    onSettled: () => settle(client, projectKey),
+    onError: (error, { flag }, context) => rollback(client, projectId, context, flag, error),
+    onSettled: () => settle(client, projectId),
   });
 }
 
-/**
- * Applies changes made by someone else as they arrive, and flashes the row.
- * Today the events come from the dev panel (mocks/api.ts). Later this subscribes to the real SSE
- * stream instead; the cache update and the flash stay exactly the same.
- */
-export function useRemoteUpdates(projectKey: string) {
+export function useCreateFlag(project: Project | undefined) {
   const client = useQueryClient();
-  useEffect(
-    () =>
-      subscribeToRemoteChanges((change) => {
-        if (change.flag.projectKey !== projectKey) return;
-        patchFlag(client, projectKey, change.flag.id, () => change.flag);
-        void client.invalidateQueries({ queryKey: queryKeys.activity(projectKey) });
-        flash(change.flag.id, "remote");
-      }),
-    [client, projectKey],
-  );
+  return useMutation({
+    mutationKey: flagWrites(project?.id ?? "none"),
+    mutationFn: (input: { key: string; name: string; description?: string }) => createFlag(project!, input),
+    onSuccess: (flag) => {
+      client.setQueryData<Flag[]>(queryKeys.flags(project!.id), (current) => (current ? [...current.filter((f) => f.id !== flag.id), flag] : [flag]));
+      flash(flag.id, "local");
+      toast(`${flag.key} created`, { detail: "Off in every environment until you turn it on." });
+    },
+    onSettled: () => project && settle(client, project.id),
+  });
+}
+
+/** First-run setup: a workspace and its first project, one after the other. */
+export function useCreateWorkspace() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { name: string; slug: string; projectName: string; projectKey: string }) => {
+      const workspace = await createWorkspace({ name: input.name, slug: input.slug });
+      const project = await createProject(workspace.id, { name: input.projectName, key: input.projectKey });
+      return { workspace, project };
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.workspaces }),
+  });
+}
+
+// ---- live updates --------------------------------------------------------------------------------
+
+/** What a row shows for one environment, reduced to text, so "did anything visible change?" is a string compare. */
+const signature = (state: FlagState) =>
+  JSON.stringify([state.enabled, state.rolloutPercentage, state.rules.map((rule) => [fromRule(rule).conditions, rule.rolloutPercentage])]);
+
+/**
+ * Keeps one project's flags live.
+ *
+ * The stream only rings a doorbell ("environment X is now at version N"). On a ring this refetches
+ * the flags through the normal API, compares them with what was on screen, and flashes exactly
+ * the rows that changed in the environment being viewed. A change you made yourself was already
+ * put in the cache optimistically, so it compares equal and does not flash as "someone else".
+ *
+ * After a reconnect the server's hello lists current versions. If any differ from the last ones
+ * seen, something was missed while offline, and the same refetch-and-compare runs.
+ */
+export function useLiveUpdates(project: Project | undefined, env: EnvKey) {
+  const client = useQueryClient();
+  // Read through a ref, so switching environment does not drop and reopen the stream.
+  const viewed = useRef(env);
+  useEffect(() => {
+    viewed.current = env;
+  }, [env]);
+
+  useEffect(() => {
+    if (!project) return;
+    const key = queryKeys.flags(project.id);
+    const known = new Map<string, number>();
+    let running: Promise<void> | null = null;
+    let again = false;
+
+    const resync = (): Promise<void> => {
+      // Bursts are folded together: at most one refetch runs, plus one more if rings arrived meanwhile.
+      if (running) {
+        again = true;
+        return running;
+      }
+      running = (async () => {
+        do {
+          again = false;
+          // A write of ours is on its way: its own onSettled refetches, and refetching now could
+          // briefly put the pre-write data back on screen.
+          if (client.isMutating({ mutationKey: flagWrites(project.id) }) > 0) continue;
+          const before = client.getQueryData<Flag[]>(key);
+          let after: Flag[];
+          try {
+            after = await client.fetchQuery({ queryKey: key, queryFn: () => fetchFlags(project), staleTime: 0 });
+          } catch {
+            continue; // the query's own error state and the fallback poll take it from here
+          }
+          if (!before) continue;
+          const env = viewed.current;
+          const was = new Map(before.map((f) => [f.id, signature(stateOf(f, env))]));
+          for (const flag of after) {
+            if (was.get(flag.id) !== signature(stateOf(flag, env))) flash(flag.id, "remote");
+          }
+          void client.invalidateQueries({ queryKey: queryKeys.activity(project.id) });
+        } while (again);
+      })().finally(() => {
+        running = null;
+      });
+      return running;
+    };
+
+    const stream = connectProjectStream(`/workspaces/${project.workspaceId}/projects/${project.id}/stream`, {
+      onStatus: setLiveStatus,
+      onHello: (versions) => {
+        const first = known.size === 0;
+        let missed = false;
+        for (const [environmentId, version] of versions) {
+          if (!first && known.get(environmentId) !== version) missed = true;
+          known.set(environmentId, version);
+        }
+        if (missed) void resync();
+      },
+      onChange: ({ environmentId, version }) => {
+        if ((known.get(environmentId) ?? -1) >= version) return; // old news (a late or repeated event)
+        known.set(environmentId, version);
+        void resync();
+      },
+    });
+
+    return () => {
+      stream.close();
+      setLiveStatus("off");
+    };
+  }, [client, project]);
 }

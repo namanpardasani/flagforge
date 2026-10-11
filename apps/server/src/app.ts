@@ -67,7 +67,7 @@ export function createApp({ logger, config, prisma, checkDatabase, redis, realti
   app.use(healthRouter(checkDatabase, () => services.status()));
   app.use(authRouter(createAuthService(prisma, config), config, services.rateLimiter, limits));
   app.use(workspacesRouter(createWorkspaceService(prisma), prisma, config));
-  app.use(projectsRouter(createProjectService(prisma, services.keyCache), prisma, config));
+  app.use(projectsRouter(createProjectService(prisma, services.keyCache), prisma, config, rt.dashboard));
   app.use(flagsRouter(createFlagService(prisma, { bus: rt.bus, cache: services.configCache }), prisma, config));
   app.use(apiKeysRouter(createApiKeyService(prisma, rt.bus, services.keyCache), prisma, config));
   app.use(

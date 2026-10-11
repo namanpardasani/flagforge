@@ -41,8 +41,11 @@ export function Boot({ onReveal, onGone }: BootProps) {
 
   useEffect(() => {
     const started = performance.now();
-    let frame = requestAnimationFrame(function tick(now) {
-      const progress = Math.min(1, (now - started) / COUNT_MS);
+    let frame = requestAnimationFrame(function tick() {
+      if (revealed.current) return; // skipped: leave the counter at 100
+      // Read the clock here instead of trusting the frame's timestamp, which can be slightly
+      // earlier than `started` (it marks when the frame began) and would show a negative number.
+      const progress = Math.min(1, Math.max(0, (performance.now() - started) / COUNT_MS));
       setPercent(Math.round(progress * 100));
       if (progress < 1) frame = requestAnimationFrame(tick);
       else finish();

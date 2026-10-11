@@ -1,9 +1,8 @@
 import type { Operator } from "@flagforge/core";
 
 /**
- * MOCK DATA. Nothing here comes from the server yet.
- * The shapes follow what the real API returns (apps/server), so a later step can replace the
- * fetchers in mocks/api.ts without changing any component.
+ * TEST DATA. The in-memory server used by tests (fake-server.ts) starts from this. The app itself
+ * never imports it: at run time everything comes from the real API.
  *
  * Timestamps are fixed strings on purpose: the UI must render the same way every time, so
  * screenshots and tests do not drift with the clock.

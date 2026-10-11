@@ -8,7 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useActivity, useFlags } from "@/data/queries";
 import { cn } from "@/lib/cn";
 import { capitalize, countWord, formatStamp, plural } from "@/lib/format";
-import { ENVIRONMENTS, type Flag, type FlagState } from "@/mocks/data";
+import { can, envName as nameOf, stateOf, type Environment, type Flag, type FlagState } from "@/api/types";
+import { Problem } from "@/components/ui/problem";
 import { RevealGroup, RevealItem } from "@/motion";
 
 /** How one flag reads in one environment: "off", "on", or its rollout share. */
@@ -20,17 +21,20 @@ function stateText(state: FlagState) {
 export function OverviewPage() {
   const scope = useScope();
   const { env } = useShell();
-  const flags = useFlags(scope.projectKey);
-  const activity = useActivity(scope.projectKey);
-  const envName = ENVIRONMENTS.find((e) => e.key === env)?.name.toLowerCase() ?? env;
+  const flags = useFlags(scope.project);
+  const activity = useActivity(scope.project, scope.role);
+  const environments = scope.project?.environments ?? [];
+  const mayReadLog = can.readAuditLog(scope.role);
+  const envName = nameOf(env).toLowerCase();
   const projectName = scope.project?.name ?? scope.projectKey;
 
-  if (flags.isPending || activity.isPending) return <OverviewSkeleton />;
+  if (flags.isPending || (mayReadLog && activity.isPending)) return <OverviewSkeleton />;
+  if (flags.isError) return <Problem error={flags.error} what="this project's flags" onRetry={() => void flags.refetch()} />;
 
   const all = flags.data ?? [];
-  const live = all.filter((f) => f.states[env].enabled);
-  const partial = live.filter((f) => f.states[env].rolloutPercentage < 100);
-  const withRules = all.filter((f) => f.states[env].rules.length > 0);
+  const live = all.filter((f) => stateOf(f, env).enabled);
+  const partial = live.filter((f) => stateOf(f, env).rolloutPercentage < 100);
+  const withRules = all.filter((f) => stateOf(f, env).rules.length > 0);
 
   return (
     <RevealGroup className="space-y-10">
@@ -73,13 +77,23 @@ export function OverviewPage() {
           <section aria-labelledby="matrix-title">
             <FigCaption id="matrix-title" index="0.2" label="State by environment" />
             <Frame className="mt-3">
-              <EnvironmentMatrix flags={all} />
+              <EnvironmentMatrix flags={all} environments={environments} />
             </Frame>
           </section>
 
           <section aria-labelledby="changes-title">
             <FigCaption id="changes-title" index="0.3" label="Recent changes" />
-            <Frame className="mt-3">
+            {!mayReadLog ? (
+              // Not an error: the audit log is for admins. Say so instead of showing an empty box.
+              <p className="mt-3 rounded-xs border border-dashed border-hairline px-4 py-6 text-center text-sm text-muted">The change history is visible to workspace admins and owners.</p>
+            ) : activity.isError ? (
+              <div className="mt-3">
+                <Problem error={activity.error} what="the change history" onRetry={() => void activity.refetch()} />
+              </div>
+            ) : (activity.data ?? []).length === 0 ? (
+              <p className="mt-3 rounded-xs border border-dashed border-hairline px-4 py-6 text-center text-sm text-muted">No changes recorded yet.</p>
+            ) : (
+              <Frame className="mt-3">
               <ol>
                 {(activity.data ?? []).slice(0, 6).map((entry) => (
                   <li key={entry.id} className="border-b border-hairline px-4 py-3 last:border-b-0">
@@ -98,6 +112,7 @@ export function OverviewPage() {
                 ))}
               </ol>
             </Frame>
+            )}
             <p className="caption mt-2 text-faint">Times in UTC</p>
           </section>
         </RevealItem>
@@ -119,14 +134,14 @@ function Stat({ label, value, note, live = false }: { label: string; value: numb
   );
 }
 
-function EnvironmentMatrix({ flags }: { flags: readonly Flag[] }) {
+function EnvironmentMatrix({ flags, environments }: { flags: readonly Flag[]; environments: readonly Environment[] }) {
   const { env } = useShell();
   return (
     <Table aria-label="Flag state in each environment">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead>Flag</TableHead>
-          {ENVIRONMENTS.map((e) => (
+          {environments.map((e) => (
             <TableHead key={e.key} className={cn("w-24", e.key === env && "text-ink")}>
               {e.key}
             </TableHead>
@@ -140,8 +155,8 @@ function EnvironmentMatrix({ flags }: { flags: readonly Flag[] }) {
               <span className="block truncate font-mono text-xs text-ink">{flag.key}</span>
               <span className="block truncate text-xs text-muted">{flag.name}</span>
             </TableCell>
-            {ENVIRONMENTS.map((e) => {
-              const state = flag.states[e.key];
+            {environments.map((e) => {
+              const state = stateOf(flag, e.key);
               return (
                 <TableCell key={e.key} className="w-24">
                   <span className={cn("flex items-center gap-2 font-mono text-xs", !state.enabled ? "text-faint" : e.key === env ? "text-ink" : "text-muted")}>

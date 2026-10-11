@@ -1,6 +1,7 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { flagUrl, FLAGS_URL, renderApp } from "@/test/render-app";
+import { server } from "@/test/setup";
 
 // `hidden: true` because an open dialog marks the page behind it aria-hidden, and these helpers
 // are also used to check that the page behind did NOT change.
@@ -11,10 +12,12 @@ const rowFor = (key: string) => rows().find((row) => within(row).queryByRole("li
 const toggleIn = (key: string) => within(rowFor(key)).getByRole("switch", hidden);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Opens the dev panel and pretends a teammate changed the next flag. */
-async function simulateRemoteUpdate(user: Awaited<ReturnType<typeof renderApp>>["user"]) {
-  if (!screen.queryByRole("button", { name: "Simulate remote update" })) await user.click(screen.getByRole("button", { name: "Dev" }));
-  await user.click(screen.getByRole("button", { name: "Simulate remote update" }));
+/** A teammate changes the next flag. The server announces it on the live stream, like any change. */
+async function simulateRemoteUpdate(env = "prod") {
+  await act(async () => {
+    server.remoteChange("dispatch-api", env);
+    await server.whenIdle();
+  });
 }
 
 describe("flag list", () => {
@@ -56,8 +59,9 @@ describe("flag list", () => {
   it("opens a flag from its key", async () => {
     const { user, router } = await renderApp(FLAGS_URL);
     await user.click(await screen.findByRole("link", { name: "instant-payouts" }));
-    expect(router.state.location.pathname).toBe(flagUrl("instant-payouts"));
+    // The detail screen is a lazily loaded route, so the address changes a moment after the click.
     expect(await screen.findByRole("heading", { level: 1, name: "instant-payouts" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(flagUrl("instant-payouts"));
   });
 
   it("copies a key from the quick actions", async () => {
@@ -107,8 +111,7 @@ describe("toggling outside Production", () => {
   it("puts the switch back and says so when the server refuses (optimistic rollback)", async () => {
     const { user } = await renderApp(FLAGS_URL, { env: "staging" });
     await screen.findByRole("list", { name: "Flags" });
-    await user.click(screen.getByRole("button", { name: "Dev" }));
-    await user.click(screen.getByRole("checkbox", { name: /Fail the next save/ }));
+    server.failNextWrite();
 
     await user.click(toggleIn("eta-dark-launch"));
     expect(await screen.findByText("Could not save eta-dark-launch")).toBeInTheDocument();
@@ -214,11 +217,11 @@ describe("Production kill switch (hold to confirm)", () => {
 
 describe("live updates", () => {
   it("applies a change made elsewhere, flashes that row ember and tags it", async () => {
-    const { user } = await renderApp(FLAGS_URL);
+    await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
     expect(within(rowFor("route-optimizer-v2")).getByText("25%")).toBeInTheDocument();
 
-    await simulateRemoteUpdate(user);
+    await simulateRemoteUpdate();
     const row = rowFor("route-optimizer-v2");
     expect(await within(row).findByText("35%")).toBeInTheDocument();
     expect(within(row).getByText("updated just now")).toBeInTheDocument();
@@ -229,10 +232,10 @@ describe("live updates", () => {
   });
 
   it("moves through the flags in turn, so the demo is predictable", async () => {
-    const { user } = await renderApp(FLAGS_URL);
+    await renderApp(FLAGS_URL);
     await screen.findByRole("list", { name: "Flags" });
-    await simulateRemoteUpdate(user); // first flag: rollout 25 -> 35
-    await simulateRemoteUpdate(user); // second flag: carrier-rate-cache turned off
+    await simulateRemoteUpdate(); // first flag: rollout 25 -> 35
+    await simulateRemoteUpdate(); // second flag: carrier-rate-cache turned off
     await waitFor(() => expect(toggleIn("carrier-rate-cache")).not.toBeChecked());
     expect(rowFor("carrier-rate-cache").querySelector('[data-flash="remote"]')).not.toBeNull();
   });
@@ -332,9 +335,9 @@ describe("flag detail", () => {
   });
 
   it("follows a live update when there are no local edits", async () => {
-    const { user } = await renderApp(flagUrl("route-optimizer-v2"));
+    await renderApp(flagUrl("route-optimizer-v2"));
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
-    await simulateRemoteUpdate(user); // route-optimizer-v2: 25 -> 35
+    await simulateRemoteUpdate(); // route-optimizer-v2: 25 -> 35
     await waitFor(() => expect(slider).toHaveAttribute("aria-valuenow", "35"));
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
     expect(screen.getByText("updated just now")).toBeInTheDocument();
@@ -345,7 +348,7 @@ describe("flag detail", () => {
     const slider = await screen.findByRole("slider", { name: "Rollout percentage" });
     slider.focus();
     await user.keyboard("{Home}"); // local edit: 0%
-    await simulateRemoteUpdate(user); // meanwhile someone sets 35%
+    await simulateRemoteUpdate(); // meanwhile someone sets 35%
 
     expect(slider).toHaveAttribute("aria-valuenow", "0"); // your edit is not thrown away
     expect(await screen.findByText(/also changed elsewhere/)).toBeInTheDocument();
@@ -430,13 +433,5 @@ describe("command palette with flags", () => {
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("dialog", { name: "Turn off carrier-rate-cache in Production?" })).toBeInTheDocument();
     expect(toggleIn("carrier-rate-cache")).toBeChecked(); // nothing happened yet
-  });
-
-  it("can trigger the simulated live update", async () => {
-    const { user } = await renderApp(FLAGS_URL);
-    await screen.findByRole("list", { name: "Flags" });
-    await user.keyboard("{Control>}k{/Control}");
-    await user.keyboard("simulate{Enter}");
-    expect(await within(rowFor("route-optimizer-v2")).findByText("updated just now")).toBeInTheDocument();
   });
 });

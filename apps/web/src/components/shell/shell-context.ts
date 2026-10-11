@@ -1,5 +1,5 @@
 import { createContext } from "react";
-import type { EnvKey } from "@/mocks/data";
+import type { EnvKey } from "@/api/types";
 
 export interface ShellState {
   collapsed: boolean;

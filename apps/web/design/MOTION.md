@@ -113,7 +113,7 @@ rotation only: no stroke-dashoffset animation and no React re-render per frame. 
 nothing; holding Space or Enter works the same as holding the pointer.
 
 **Row flash.** An absolutely positioned layer over the row fades its opacity to zero. Ember, 1.2s,
-for a change that arrived from elsewhere; ink, quick, for your own change; danger for a Production
+for a change that arrived from elsewhere (over the live stream: the app refetches, compares with what was on screen, and flashes only rows that differ in the environment being viewed); ink, quick, for your own change; danger for a Production
 kill. The 1.2s live-update flash is the one deliberate exception to the 800ms ceiling: it is
 passive (it never delays an action) and it has to be noticed in peripheral vision. The mono
 "updated just now" tag stays for 6 seconds.

@@ -6,8 +6,8 @@ const sidebar = () => screen.getByRole("complementary", { name: "Sidebar" });
 
 describe("dashboard shell", () => {
   it("shows a loading state first, then the overview built from the mock data", async () => {
-    await renderApp();
-    expect(screen.getByRole("status", { name: "Loading overview" })).toBeInTheDocument();
+    await renderApp(undefined, { settle: false });
+    expect(await screen.findByRole("status", { name: "Loading overview" })).toBeInTheDocument();
     const heading = await screen.findByRole("heading", { level: 1 });
     expect(heading).toHaveTextContent("Six flags in Dispatch API, two live in production.");
     expect(screen.queryByRole("status", { name: "Loading overview" })).not.toBeInTheDocument();
@@ -221,9 +221,10 @@ describe("flag list basics", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 
-  it("says plainly that the data is mock and unsaved", async () => {
+  it("no longer claims to be mock data", async () => {
     await renderApp("/w/halden/p/dispatch-api/flags");
-    expect(await screen.findByText(/Mock data/)).toBeInTheDocument();
+    await screen.findByRole("list", { name: "Flags" });
+    expect(screen.queryByText(/Mock data/)).not.toBeInTheDocument();
   });
 });
 
@@ -238,12 +239,12 @@ describe("ui kit", () => {
   it("renders inside the shell and selects table rows", async () => {
     const { user } = await renderApp("/kit");
     await user.click(await screen.findByRole("tab", { name: "Data" }));
-    const table = screen.getByRole("table", { name: "Flags in Dispatch API" });
+    const table = screen.getByRole("table", { name: "Sample flags" });
     await user.click(within(table).getByRole("checkbox", { name: "Select flag route-optimizer-v2" }));
-    expect(screen.getByText("1 of 6 selected")).toBeInTheDocument();
+    expect(screen.getByText("1 of 4 selected")).toBeInTheDocument();
     await user.click(within(table).getByRole("checkbox", { name: "Select all rows" }));
-    expect(screen.getByText("6 of 6 selected")).toBeInTheDocument();
+    expect(screen.getByText("4 of 4 selected")).toBeInTheDocument();
     await user.click(within(table).getByRole("checkbox", { name: "Select all rows" }));
-    expect(screen.getByText("0 of 6 selected")).toBeInTheDocument();
+    expect(screen.getByText("0 of 4 selected")).toBeInTheDocument();
   });
 });

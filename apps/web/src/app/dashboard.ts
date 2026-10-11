@@ -5,3 +5,5 @@ export { FlagDetailPage } from "@/pages/FlagDetail";
 export { KitPage } from "@/pages/Kit";
 export { NotFound, ProjectPage } from "@/pages/ProjectPage";
 export { WorkspaceIndex } from "@/pages/WorkspaceIndex";
+export { LoginPage, RegisterPage } from "@/pages/Auth";
+export { HomeRedirect, WelcomePage } from "@/pages/Welcome";

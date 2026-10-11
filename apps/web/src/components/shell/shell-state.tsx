@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { EnvKey } from "@/mocks/data";
+import type { EnvKey } from "@/api/types";
 import { ShellContext } from "./shell-context";
 
-const ENVS: readonly EnvKey[] = ["dev", "staging", "prod"];
+/** Environment keys are lowercase letters, numbers and hyphens (the server enforces this); anything else was not saved by us. */
+const isEnvKey = (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 40;
 
 /** localStorage can throw (private mode, blocked storage), so every access is guarded. */
 function read<T>(key: string, parse: (raw: string) => T | undefined, fallback: T): T {
@@ -24,7 +25,7 @@ function write(key: string, value: string) {
 /** UI state shared across the shell: sidebar width, the chosen environment and the command palette. */
 export function ShellProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(() => read("ff.sidebar", (v) => v === "collapsed", false));
-  const [env, setEnvState] = useState<EnvKey>(() => read("ff.env", (v) => ENVS.find((e) => e === v), "prod"));
+  const [env, setEnvState] = useState<EnvKey>(() => read("ff.env", (v) => (isEnvKey(v) ? v : undefined), "prod"));
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const toggleCollapsed = useCallback(() => {

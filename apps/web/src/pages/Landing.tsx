@@ -6,7 +6,7 @@ import { lazy, Suspense, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Grain, GridLines } from "@/components/blueprint/marks";
 import { Mark } from "@/components/shell/Sidebar";
-import { DEFAULT_SCOPE, paths } from "@/components/shell/use-scope";
+import { paths } from "@/components/shell/use-scope";
 import { cn } from "@/lib/cn";
 import { Boot } from "@/landing/Boot";
 import { shouldBoot } from "@/landing/boot-session";
@@ -38,7 +38,8 @@ const NAV = [
  * itself off when the visitor prefers reduced motion.
  */
 export default function LandingPage() {
-  const dashboard = paths.project(DEFAULT_SCOPE.workspaceSlug, DEFAULT_SCOPE.projectKey);
+  // "/" sends a signed-in visitor to their first project and anyone else to the sign-in screen.
+  const dashboard = paths.home;
   const reduced = useReducedMotion() ?? false;
   const fine = useFinePointer();
   // Decided once, on the first render: the intro must not appear halfway through a visit.

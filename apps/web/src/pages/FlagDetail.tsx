@@ -19,18 +19,21 @@ import { useSaveTargeting } from "@/data/mutations";
 import { useActivity, useFlags } from "@/data/queries";
 import { formatStamp, plural } from "@/lib/format";
 import { sameTargeting, validateRule, type Targeting } from "@/lib/targeting";
-import { envName, type Activity, type EnvKey, type Flag } from "@/mocks/data";
+import { can, envName, isProduction, stateOf, type Activity, type EnvKey, type Flag, type Project } from "@/api/types";
+import { Problem } from "@/components/ui/problem";
 import { quiet, RevealGroup, RevealItem } from "@/motion";
 
 export function FlagDetailPage() {
   const { flagKey = "" } = useParams();
   const scope = useScope();
   const { env } = useShell();
-  const flags = useFlags(scope.projectKey);
-  const activity = useActivity(scope.projectKey);
+  const flags = useFlags(scope.project);
+  const activity = useActivity(scope.project, scope.role);
+  const canEdit = can.editFlags(scope.role);
   const listPath = paths.project(scope.workspaceSlug, scope.projectKey, "flags");
 
   if (flags.isPending) return <DetailSkeleton />;
+  if (flags.isError) return <Problem error={flags.error} what="this flag" onRetry={() => void flags.refetch()} />;
 
   const flag = flags.data?.find((f) => f.key === flagKey);
   if (!flag) {
@@ -55,23 +58,23 @@ export function FlagDetailPage() {
         <Link to={listPath} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink">
           <ArrowLeft className="size-3.5" strokeWidth={1.5} /> All flags
         </Link>
-        <Header flag={flag} env={env} />
+        <Header flag={flag} env={env} canEdit={canEdit} />
       </RevealItem>
 
       {/* The key resets the editor's draft when you switch flag or environment. */}
       <RevealItem className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <TargetingEditor key={`${flag.id}:${env}`} flag={flag} env={env} projectKey={scope.projectKey} />
+        <TargetingEditor key={`${flag.id}:${env}`} flag={flag} env={env} project={scope.project} canEdit={canEdit} />
         <aside className="space-y-10">
-          <History entries={(activity.data ?? []).filter((a) => a.subject === flag.key)} loading={activity.isPending} />
+          <History entries={(activity.data ?? []).filter((a) => a.subject === flag.key)} loading={activity.isPending} allowed={can.readAuditLog(scope.role)} error={activity.error} />
         </aside>
       </RevealItem>
     </RevealGroup>
   );
 }
 
-function Header({ flag, env }: { flag: Flag; env: EnvKey }) {
+function Header({ flag, env, canEdit }: { flag: Flag; env: EnvKey; canEdit: boolean }) {
   const toggle = useGuardedToggle();
-  const state = flag.states[env];
+  const state = stateOf(flag, env);
   return (
     <Frame className="relative mt-4 p-5">
       <RowFlash flagId={flag.id} />
@@ -84,7 +87,7 @@ function Header({ flag, env }: { flag: Flag; env: EnvKey }) {
         </div>
         <div className="flex flex-col items-end gap-2">
           <p className="caption text-muted">{envName(env)}</p>
-          <FlagToggle checked={state.enabled} onCheckedChange={(next) => toggle(flag, next)} label={`${flag.name} in ${envName(env)}`} showStatus />
+          <FlagToggle checked={state.enabled} onCheckedChange={(next) => toggle(flag, next)} label={`${flag.name} in ${envName(env)}`} disabled={!canEdit} showStatus />
           <UpdatedTag flagId={flag.id} />
           {env === "prod" && <p className="max-w-[14rem] text-right text-xs text-faint">Changes in Production need a hold to confirm.</p>}
         </div>
@@ -105,10 +108,10 @@ function Header({ flag, env }: { flag: Flag; env: EnvKey }) {
  *   base  - the saved value this draft started from
  *   draft - what is on screen
  */
-function TargetingEditor({ flag, env, projectKey }: { flag: Flag; env: EnvKey; projectKey: string }) {
-  const state = flag.states[env];
+function TargetingEditor({ flag, env, project, canEdit }: { flag: Flag; env: EnvKey; project: Project | undefined; canEdit: boolean }) {
+  const state = stateOf(flag, env);
   const saved: Targeting = { rolloutPercentage: state.rolloutPercentage, rules: state.rules };
-  const save = useSaveTargeting(projectKey);
+  const save = useSaveTargeting(project);
 
   const [base, setBase] = useState(saved);
   const [draft, setDraft] = useState(saved);
@@ -138,7 +141,7 @@ function TargetingEditor({ flag, env, projectKey }: { flag: Flag; env: EnvKey; p
       <section aria-labelledby="rollout-title">
         <FigCaption id="rollout-title" index="1.4" label="Rollout" />
         <Frame className="mt-3 p-5">
-          <RolloutPreview flagKey={flag.key} value={draft.rolloutPercentage} saved={saved.rolloutPercentage} live={state.enabled} onChange={(rolloutPercentage) => setDraft((d) => ({ ...d, rolloutPercentage }))} />
+          <RolloutPreview flagKey={flag.key} value={draft.rolloutPercentage} saved={saved.rolloutPercentage} live={state.enabled} disabled={!canEdit} onChange={(rolloutPercentage) => setDraft((d) => ({ ...d, rolloutPercentage }))} />
         </Frame>
       </section>
 
@@ -146,7 +149,8 @@ function TargetingEditor({ flag, env, projectKey }: { flag: Flag; env: EnvKey; p
         <FigCaption id="rules-title" index="1.5" label="Targeting rules" />
         <p className="mt-2 max-w-prose text-sm text-muted">Checked from the top. The first rule a user matches decides, and the rest are skipped.</p>
         <div className="mt-3">
-          <RuleBuilder rules={draft.rules} onChange={(rules) => setDraft((d) => ({ ...d, rules }))} />
+          <RuleBuilder rules={draft.rules} onChange={(rules) => setDraft((d) => ({ ...d, rules }))} disabled={!canEdit} />
+          {!canEdit && <p className="mt-3 text-xs text-faint">Your role can read targeting but not change it.</p>}
         </div>
       </section>
 
@@ -192,10 +196,10 @@ function TargetingEditor({ flag, env, projectKey }: { flag: Flag; env: EnvKey; p
             >
               {stale ? "Load latest" : "Discard"}
             </Button>
-            {env === "prod" ? (
+            {isProduction(env) ? (
               // The key gives a fresh button after each apply, since a completed hold cannot be reused.
               <HoldToConfirm key={applied} tone="ink" disabled={invalid > 0} onConfirm={apply}>
-                Hold to apply to Production
+                Hold to apply to {envName(env)}
               </HoldToConfirm>
             ) : (
               <Button variant="solid" disabled={invalid > 0} onClick={apply}>
@@ -222,11 +226,17 @@ function Step({ n, title, live, children }: { n: string; title: string; live?: b
   );
 }
 
-function History({ entries, loading }: { entries: Activity[]; loading: boolean }) {
+function History({ entries, loading, allowed, error }: { entries: Activity[]; loading: boolean; allowed: boolean; error: unknown }) {
   return (
     <section aria-labelledby="history-title">
       <FigCaption id="history-title" index="1.7" label="Recent changes" />
-      {loading ? (
+      {!allowed ? (
+        <p className="mt-3 rounded-xs border border-dashed border-hairline px-4 py-6 text-center text-sm text-muted">The change history is visible to workspace admins and owners.</p>
+      ) : error ? (
+        <p role="alert" className="mt-3 rounded-xs border border-dashed border-hairline px-4 py-6 text-center text-sm text-muted">
+          The change history could not be loaded.
+        </p>
+      ) : loading ? (
         <SkeletonGroup label="Loading changes" className="mt-3 space-y-2">
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />

@@ -1,5 +1,6 @@
 import { bucketFor, type Operator } from "@flagforge/core";
-import type { FlagState, TargetingRule } from "@/mocks/data";
+import { fromRule } from "@/api/adapters";
+import type { Targeting, TargetingRule } from "@/api/types";
 
 export const OPERATORS: readonly { value: Operator; label: string; kind: "text" | "list" | "number" }[] = [
   { value: "equals", label: "is", kind: "text" },
@@ -25,8 +26,10 @@ export const newRule = (): TargetingRule => ({ id: crypto.randomUUID(), attribut
 /** What is wrong with a rule, in words a person can act on. Null means it is fine. Mirrors the server's checks. */
 export function validateRule(rule: TargetingRule): string | null {
   if (!rule.attribute.trim()) return "Name the attribute to check.";
+  if (rule.attribute.trim().length > 100) return "Attribute names can be at most 100 characters.";
   const value = rule.value.trim();
   if (!value) return "Give a value to compare against.";
+  if (value.split(",").some((part) => part.trim().length > 256)) return "Values can be at most 256 characters.";
   const kind = operatorKind(rule.operator);
   if (kind === "number" && !Number.isFinite(Number(value))) return "This comparison needs a number.";
   if (kind === "list" && value.split(",").every((part) => !part.trim())) return "List at least one value, separated by commas.";
@@ -34,10 +37,14 @@ export function validateRule(rule: TargetingRule): string | null {
   return null;
 }
 
-export type Targeting = Pick<FlagState, "rolloutPercentage" | "rules">;
+export type { Targeting };
 
-/** Compares two targeting drafts by content. Used to decide whether there is anything to save. */
-export const sameTargeting = (a: Targeting, b: Targeting) => JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Compares two targeting drafts by what would be SENT to the server, not by the text in the form:
+ * "OSL,BGO" and "OSL, BGO" are the same list. Used to decide whether there is anything to save.
+ */
+const wire = (targeting: Targeting) => JSON.stringify([targeting.rolloutPercentage, targeting.rules.map(fromRule)]);
+export const sameTargeting = (a: Targeting, b: Targeting) => wire(a) === wire(b);
 
 // ---- rollout preview -----------------------------------------------------------------------------
 

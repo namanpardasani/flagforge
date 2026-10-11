@@ -33,7 +33,8 @@ afterEach(() => {
 });
 
 const boot = () => document.querySelector("[data-boot]");
-const openLanding = () => renderApp("/landing");
+// The landing page needs no session and no API, so it is opened signed out and without waiting for data.
+const openLanding = () => renderApp("/landing", { signedIn: false, settle: false });
 /** Opens the page as a returning visitor: no boot sequence. */
 const openBooted = () => {
   window.sessionStorage.setItem("ff.booted", "1");
@@ -50,11 +51,11 @@ describe("boot sequence", () => {
 
   it("can be skipped with the button", async () => {
     const { user } = await openLanding();
-    const started = Date.now();
     await user.click(await screen.findByRole("button", { name: "Skip" }));
+    // Marked as seen at the moment of skipping, not when the count would have finished.
     expect(window.sessionStorage.getItem("ff.booted")).toBe("1");
+    expect(boot()).toHaveTextContent("100%");
     await waitFor(() => expect(boot()).toBeNull(), { timeout: 4000 });
-    expect(Date.now() - started).toBeLessThan(1100); // sooner than letting it run
   });
 
   it("can be skipped with any key", async () => {
@@ -213,6 +214,6 @@ describe("the rest of the page", () => {
   it("links to the dashboard", async () => {
     await openBooted();
     const links = await screen.findAllByRole("link", { name: /Open (the )?dashboard/ });
-    for (const link of links) expect(link).toHaveAttribute("href", "/w/halden/p/dispatch-api/overview");
+    for (const link of links) expect(link).toHaveAttribute("href", "/");
   });
 });

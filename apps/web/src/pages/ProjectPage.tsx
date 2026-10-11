@@ -33,12 +33,13 @@ function NotBuiltYet({ label }: { label: string }) {
 
 export function NotFound() {
   const scope = useScope();
+  const home = scope.workspaceSlug && scope.projectKey ? paths.project(scope.workspaceSlug, scope.projectKey) : paths.home;
   return (
     <div className="mx-auto max-w-md py-24 text-center">
       <p className="font-mono text-5xl text-ink">404</p>
       <FigCaption index="4.04" label="No such page" className="mt-6 justify-center" />
       <p className="mt-3 text-sm text-muted">That address does not match anything in FlagForge.</p>
-      <Link to={paths.project(scope.workspaceSlug, scope.projectKey)} className="mt-6 inline-block border-b border-ink pb-0.5 text-sm text-ink">
+      <Link to={home} className="mt-6 inline-block border-b border-ink pb-0.5 text-sm text-ink">
         Back to the overview
       </Link>
     </div>

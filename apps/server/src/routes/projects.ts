@@ -11,9 +11,10 @@ import {
   projectParams,
 } from "../projects/schemas.js";
 import type { ProjectService } from "../projects/service.js";
+import type { DashboardStreams } from "../realtime/dashboard-streams.js";
 import { workspaceParams } from "../workspaces/schemas.js";
 
-export function projectsRouter(service: ProjectService, prisma: PrismaClient, config: Config): Router {
+export function projectsRouter(service: ProjectService, prisma: PrismaClient, config: Config, live: DashboardStreams): Router {
   const router = Router();
   const auth = requireAuth(config);
   const viewer = requireWorkspaceRole(prisma, "VIEWER");
@@ -73,6 +74,17 @@ export function projectsRouter(service: ProjectService, prisma: PrismaClient, co
       );
       res.status(204).end();
     },
+  );
+
+  // Live updates for the dashboard. Any member may listen (it carries version numbers only); the
+  // data itself is still fetched through the routes above, with their own role checks.
+  router.get(`${base}/:projectId/stream`, auth, validate(projectParams, "params"), viewer, (req, res) =>
+    live.handle(res, {
+      userId: req.membership!.userId,
+      workspaceId: req.membership!.workspaceId,
+      projectId: req.params["projectId"] as string,
+      expiresAt: req.tokenExpiresAt!,
+    }),
   );
 
   return router;

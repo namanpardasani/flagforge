@@ -11,16 +11,21 @@ export function signAccessToken(config: Config, userId: string): string {
   });
 }
 
-/** Returns the user id from a valid access token, or throws a 401. */
-export function verifyAccessToken(config: Config, token: string): string {
+/** Returns who a valid access token belongs to and when it stops being valid, or throws a 401. */
+export function readAccessToken(config: Config, token: string): { userId: string; expiresAt: number } {
   try {
     // Pinning the algorithm stops "alg: none" and algorithm-swap attacks.
     const payload = jwt.verify(token, config.JWT_ACCESS_SECRET, { algorithms: ["HS256"] });
-    if (typeof payload === "string" || !payload.sub) throw new Error("no subject");
-    return payload.sub;
+    if (typeof payload === "string" || !payload.sub || typeof payload.exp !== "number") throw new Error("no subject");
+    return { userId: payload.sub, expiresAt: payload.exp * 1000 };
   } catch {
     throw new AppError(401, "UNAUTHORIZED", "Invalid or expired access token");
   }
+}
+
+/** Returns the user id from a valid access token, or throws a 401. */
+export function verifyAccessToken(config: Config, token: string): string {
+  return readAccessToken(config, token).userId;
 }
 
 /** A random opaque token. Only its hash is stored, so a DB leak does not leak usable tokens. */

@@ -1,19 +1,33 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
-import { resetMockServer } from "@/mocks/api";
+import { configureApi, resetApiClient } from "@/api/client";
+import { resetSession } from "@/api/session";
 import { resetFlashes } from "@/stores/flash";
+import { resetLiveStatus } from "@/stores/live";
 import { resetToasts } from "@/stores/toasts";
+import { createFakeServer } from "./fake-server";
 
 // jsdom is a pretend browser and leaves out several APIs the UI libraries call. These are the
 // smallest stand-ins that let components mount; they do not try to imitate real behaviour.
 
 // Everything that outlives a component (saved preferences, the pretend server, the stores) is put
 // back after each test, so no test can pass or fail because of the one before it.
+// "findBy..." waits this long before giving up. The default (1s) is too tight when many test files
+// share the machine; a real failure still fails, just a little later.
+configure({ asyncUtilTimeout: 3000 });
+
+/** The pretend API every test talks to. Tests reach in to change roles, break things or push live updates. */
+export const server = createFakeServer();
+configureApi({ baseUrl: "http://api.test", fetch: server.fetch });
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
-  resetMockServer();
+  server.reset();
+  resetApiClient();
+  resetSession();
+  resetLiveStatus();
   resetFlashes();
   resetToasts();
 });

@@ -1,5 +1,5 @@
 import { Navigate, type RouteObject } from "react-router";
-import { DEFAULT_SCOPE, paths } from "@/components/shell/use-scope";
+import { paths } from "@/components/shell/use-scope";
 import { LandingRoute } from "@/pages/LandingRoute";
 
 /**
@@ -18,7 +18,10 @@ const hydrateFallbackElement = <div className="h-dvh bg-canvas" />;
  * The page is a URL parameter (":page"), which lets one layout animate between every screen.
  */
 export const routes: RouteObject[] = [
-  { path: "/", element: <Navigate to={paths.project(DEFAULT_SCOPE.workspaceSlug, DEFAULT_SCOPE.projectKey)} replace /> },
+  { path: "/", hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).HomeRedirect }) },
+  { path: paths.login, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).LoginPage }) },
+  { path: paths.register, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).RegisterPage }) },
+  { path: paths.welcome, hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).WelcomePage }) },
   { path: "/w/:workspaceSlug", hydrateFallbackElement, lazy: async () => ({ Component: (await dashboard()).WorkspaceIndex }) },
   {
     path: "/w/:workspaceSlug/p/:projectKey",

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { onSignOut, restoreSession } from "@/api/session";
 import { ShellProvider } from "@/components/shell/shell-state";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { MotionProvider } from "@/motion";
@@ -10,6 +11,13 @@ export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: false, refetchOnWindowFocus: false } } }),
   );
+
+  useEffect(() => {
+    // Find out whether a saved session still works. Until this answers, protected screens wait.
+    void restoreSession();
+    // Whoever signs in next must not see anything cached for the previous person.
+    return onSignOut(() => queryClient.clear());
+  }, [queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>

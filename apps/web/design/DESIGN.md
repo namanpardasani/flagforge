@@ -96,7 +96,7 @@ Purple or blue gradients, glassmorphism, gradient icon squares, three identical 
 emoji, lorem ipsum, filler statistics, the default shadcn look, and marketing words such as
 "supercharge", "unlock" or "seamless".
 
-Every number shown in the UI is computed from data (currently the mock data). Nothing is invented
+Every number shown in the UI is computed from data (from the API). Nothing is invented
 to fill a card.
 
 ## Where things are

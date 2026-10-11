@@ -5,7 +5,7 @@ import { useId, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { ATTRIBUTE_HINTS, newRule, operatorKind, OPERATORS, validateRule } from "@/lib/targeting";
-import type { TargetingRule } from "@/mocks/data";
+import type { TargetingRule } from "@/api/types";
 import { duration, quiet } from "@/motion";
 
 interface RuleBuilderProps {
@@ -182,6 +182,13 @@ function RuleRow({ rule, index, last, disabled, onUpdate, onRemove, onMove }: Ru
           </IconButton>
         </span>
       </div>
+      {rule.more && rule.more.length > 0 && (
+        // A rule made through the API can AND several conditions. This form edits the first; the
+        // rest are shown so nothing is hidden, and are saved back unchanged.
+        <p className="border-t border-hairline px-3 py-1.5 font-mono text-2xs text-muted">
+          and also: {rule.more.map((c) => `${c.attribute} ${c.operator} ${Array.isArray(c.value) ? c.value.join(", ") : String(c.value)}`).join("; ")} <span className="text-faint">(set through the API, kept as is)</span>
+        </p>
+      )}
       {error && (
         // Not role="alert": that would interrupt a screen reader on every keystroke of a new rule.
         <p id={`${id}-error`} className="border-t border-hairline px-3 py-1.5 font-mono text-2xs text-danger">

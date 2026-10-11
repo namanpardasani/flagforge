@@ -17,7 +17,7 @@ interface FlagRow {
   description: string | null;
   createdAt: Date;
   updatedAt: Date;
-  states: { environmentId: string; enabled: boolean; rules: unknown; fallthroughBps: number }[];
+  states: { environmentId: string; enabled: boolean; rules: unknown; fallthroughBps: number; updatedAt: Date }[];
 }
 interface EnvRow {
   id: string;
@@ -25,7 +25,7 @@ interface EnvRow {
   name: string;
 }
 
-const stateSelect = { environmentId: true, enabled: true, rules: true, fallthroughBps: true } as const;
+const stateSelect = { environmentId: true, enabled: true, rules: true, fallthroughBps: true, updatedAt: true } as const;
 
 /** Every environment of the project appears in the result; a missing FlagState row means "off, everyone". */
 function present(flag: FlagRow, environments: EnvRow[]) {
@@ -47,6 +47,8 @@ function present(flag: FlagRow, environments: EnvRow[]) {
         enabled: state?.enabled ?? false,
         rules: state ? parseStoredRules(state.rules).map(presentRule) : [],
         rolloutPercentage: toPercentage(state?.fallthroughBps ?? 10000),
+        // When this environment's state last changed; null if it was never touched (still the default).
+        updatedAt: state?.updatedAt ?? null,
       };
     }),
   };

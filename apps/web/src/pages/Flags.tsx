@@ -1,4 +1,4 @@
-import { ArrowUpRight, Copy, Power, Search } from "lucide-react";
+import { ArrowUpRight, Copy, Plus, Power, Search } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -16,7 +16,10 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useFlags } from "@/data/queries";
 import { cn } from "@/lib/cn";
 import { formatStamp, plural } from "@/lib/format";
-import { envName, type EnvKey, type Flag } from "@/mocks/data";
+import { can, envName, isProduction, stateOf, type EnvKey, type Flag } from "@/api/types";
+import { NewFlagDialog } from "@/components/flags/NewFlagDialog";
+import { Button } from "@/components/ui/button";
+import { Problem } from "@/components/ui/problem";
 import { duration, quiet } from "@/motion";
 import { useFlash } from "@/stores/flash";
 import { toast } from "@/stores/toasts";
@@ -36,13 +39,15 @@ const columns = "grid grid-cols-[96px_minmax(0,1fr)_auto] items-center gap-4 md:
 export function FlagsPage() {
   const scope = useScope();
   const { env } = useShell();
-  const flags = useFlags(scope.projectKey);
+  const flags = useFlags(scope.project);
+  const canEdit = can.editFlags(scope.role);
+  const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("updated");
   const [query, setQuery] = useState("");
 
   const all = useMemo(() => flags.data ?? [], [flags.data]);
-  const onCount = all.filter((f) => f.states[env].enabled).length;
+  const onCount = all.filter((f) => stateOf(f, env).enabled).length;
   const tabs: TabItem[] = [
     { value: "all", label: "All", count: all.length },
     { value: "on", label: "On", count: onCount },
@@ -52,14 +57,14 @@ export function FlagsPage() {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const matches = all.filter((flag) => {
-      const on = flag.states[env].enabled;
+      const on = stateOf(flag, env).enabled;
       if (filter === "on" && !on) return false;
       if (filter === "off" && on) return false;
       return !needle || `${flag.key} ${flag.name} ${flag.description}`.toLowerCase().includes(needle);
     });
     return [...matches].sort((a, b) => {
       if (sort === "key") return a.key.localeCompare(b.key);
-      if (sort === "state") return Number(b.states[env].enabled) - Number(a.states[env].enabled) || a.key.localeCompare(b.key);
+      if (sort === "state") return Number(stateOf(b, env).enabled) - Number(stateOf(a, env).enabled) || a.key.localeCompare(b.key);
       return b.updatedAt.localeCompare(a.updatedAt);
     });
   }, [all, env, filter, query, sort]);
@@ -85,13 +90,21 @@ export function FlagsPage() {
             What is <span className="accent text-[1.1em]">switched</span> on in {envName(env).toLowerCase()}.
           </h1>
         </div>
-        <p className="caption rounded-xs border border-hairline px-2 py-1 text-muted">Mock data / kept in memory only</p>
+        {canEdit && scope.project && (
+          <Button variant="solid" onClick={() => setCreating(true)}>
+            <Plus strokeWidth={1.5} /> New flag
+          </Button>
+        )}
       </header>
+
+      <NewFlagDialog project={scope.project} open={creating} onOpenChange={setCreating} />
 
       {flags.isPending ? (
         <FlagsSkeleton />
+      ) : flags.isError ? (
+        <Problem error={flags.error} what="the flags" onRetry={() => void flags.refetch()} />
       ) : all.length === 0 ? (
-        <EmptyState fig="1.2" title={`No flags in ${projectName} yet`}>
+        <EmptyState fig="1.2" title={`No flags in ${projectName} yet`} action={canEdit ? <Button onClick={() => setCreating(true)}>Create the first flag</Button> : undefined}>
           A flag is a named switch your code checks before running a feature. Flags created for this project appear here, with one switch per environment.
         </EmptyState>
       ) : (
@@ -143,7 +156,7 @@ export function FlagsPage() {
                     instead of waiting for it to finish fading. */}
                 <AnimatePresence mode="popLayout" initial={false}>
                   {visible.map((flag, index) => (
-                    <FlagRow key={flag.id} flag={flag} env={env} detailPath={paths.flag(scope.workspaceSlug, scope.projectKey, flag.key)} delay={entered ? 0 : index * 0.035} />
+                    <FlagRow key={flag.id} flag={flag} env={env} canEdit={canEdit} detailPath={paths.flag(scope.workspaceSlug, scope.projectKey, flag.key)} delay={entered ? 0 : index * 0.035} />
                   ))}
                 </AnimatePresence>
               </ol>
@@ -161,6 +174,8 @@ export function FlagsPage() {
 interface FlagRowProps {
   flag: Flag;
   env: EnvKey;
+  /** Hides the switch's ability to act for read-only roles. The server refuses them anyway. */
+  canEdit: boolean;
   detailPath: string;
   /** Entrance delay in seconds (the stagger). Zero after the first paint. */
   delay: number;
@@ -174,10 +189,10 @@ interface FlagRowProps {
  * This table is a quiet zone: rows slide to a new position with a plain 180ms ease (`quiet`),
  * and the quick actions only fade.
  */
-const FlagRow = memo(function FlagRow({ flag, env, detailPath, delay }: FlagRowProps) {
+const FlagRow = memo(function FlagRow({ flag, env, canEdit, detailPath, delay }: FlagRowProps) {
   const toggle = useGuardedToggle();
   const flashing = useFlash(flag.id);
-  const state = flag.states[env];
+  const state = stateOf(flag, env);
 
   const copyKey = async () => {
     try {
@@ -198,7 +213,7 @@ const FlagRow = memo(function FlagRow({ flag, env, detailPath, delay }: FlagRowP
       className={cn(columns, "group relative border-b border-hairline px-4 py-3 last:border-b-0 focus-within:bg-raised hover:bg-raised")}
     >
       <RowFlash flagId={flag.id} />
-      <FlagToggle className="relative" checked={state.enabled} onCheckedChange={(next) => toggle(flag, next)} label={`${flag.name} in ${envName(env)}`} showStatus />
+      <FlagToggle className="relative" checked={state.enabled} onCheckedChange={(next) => toggle(flag, next)} label={`${flag.name} in ${envName(env)}`} disabled={!canEdit} showStatus />
 
       <div className="relative min-w-0">
         <Link to={detailPath} className="block truncate font-mono text-xs text-ink underline-offset-4 hover:underline">
@@ -221,8 +236,8 @@ const FlagRow = memo(function FlagRow({ flag, env, detailPath, delay }: FlagRowP
 
       {/* Always in the page (so Tab reaches them); only their visibility changes on hover or focus. */}
       <span className="relative flex justify-end gap-0.5 opacity-0 transition-opacity duration-150 ease-out-quart group-focus-within:opacity-100 group-hover:opacity-100">
-        {env === "prod" && state.enabled && (
-          <QuickAction label={`Kill ${flag.key} in Production`} onClick={() => toggle(flag, false)} danger>
+        {canEdit && isProduction(env) && state.enabled && (
+          <QuickAction label={`Kill ${flag.key} in ${envName(env)}`} onClick={() => toggle(flag, false)} danger>
             <Power />
           </QuickAction>
         )}
