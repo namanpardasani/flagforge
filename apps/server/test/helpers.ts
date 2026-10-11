@@ -4,6 +4,7 @@ import request from "supertest";
 import { createApp, type AppDeps } from "../src/app.js";
 import { loadConfig } from "../src/config.js";
 import type { RateLimits } from "../src/rate-limits.js";
+import { MemoryMailer } from "../src/mail/mailer.js";
 import { createRedisServices } from "../src/redis/index.js";
 import { prisma } from "../src/db.js";
 
@@ -33,12 +34,21 @@ export const noLimits: RateLimits = {
   refresh: unlimited,
   sdkFlags: unlimited,
   sdkEvaluate: unlimited,
+  verifyEmail: unlimited,
+  resendVerification: unlimited,
+  forgotPassword: unlimited,
+  forgotPasswordPerEmail: unlimited,
+  resetPassword: unlimited,
   sdkStream: unlimited,
   sdkEvents: unlimited,
 };
 
+/** What the app "emailed" during tests. Cleared by resetDb. */
+export const testMailer = new MemoryMailer();
+
 export function makeApp(overrides: Partial<AppDeps> = {}) {
   return createApp({
+    mailer: testMailer,
     logger: pino({ level: "silent" }),
     config: testConfig,
     prisma,
@@ -51,17 +61,24 @@ export function makeApp(overrides: Partial<AppDeps> = {}) {
 
 /** Empties every table. Safe only because setup.ts guarantees we are on the _test database. */
 export async function resetDb() {
+  testMailer.sent.length = 0;
+  testMailer.failNext = false;
   await testRedis.client?.flushdb(); // cached configs/keys/limits from the previous test must not leak into this one
   await prisma.$executeRawUnsafe(
     'TRUNCATE TABLE "ApiKey", "AuditLog", "FlagState", "Flag", "RefreshToken", "WorkspaceMember", "Environment", "Project", "Workspace", "User" CASCADE',
   );
 }
 
-/** Registers a user and returns their id plus a ready-to-use Authorization header. */
-export async function registerUser(app: Express, email: string) {
+/**
+ * Registers a user and returns their id plus a ready-to-use Authorization header.
+ * The address is marked as confirmed, as if they had opened the email, so tests can add them to
+ * workspaces; pass `{ verified: false }` to keep it unconfirmed.
+ */
+export async function registerUser(app: Express, email: string, options: { verified?: boolean } = {}) {
   const res = await request(app)
     .post("/auth/register")
     .send({ email, password: "correct horse battery", name: email.split("@")[0] });
+  if (options.verified !== false) await prisma.user.update({ where: { email }, data: { emailVerifiedAt: new Date() } });
   return {
     id: res.body.user.id as string,
     email,

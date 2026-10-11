@@ -13,6 +13,16 @@ export interface RateLimits {
   refresh: RateRule;
   sdkFlags: RateRule;
   sdkEvaluate: RateRule;
+  /** Opening the emailed "confirm" link, per IP (guessing tokens is hopeless, but cheap lookups still deserve a cap). */
+  verifyEmail: RateRule;
+  /** Asking for another confirmation email, per signed-in user. Each one sends a real email. */
+  resendVerification: RateRule;
+  /** Asking for a password-reset email, per IP, across all addresses. */
+  forgotPassword: RateRule;
+  /** ...and per address, so one person's inbox cannot be flooded from many IPs. */
+  forgotPasswordPerEmail: RateRule;
+  /** Using a reset link to set a password, per IP. */
+  resetPassword: RateRule;
   /** Opening new streams (existing streams are limited separately by the connection caps). */
   sdkStream: RateRule;
   /** Batches of experiment events, per key. Each batch may carry up to 500 events. */
@@ -31,6 +41,11 @@ export const defaultLimits: RateLimits = {
   refresh: { capacity: 60, windowMs: minute },
   sdkFlags: { capacity: 1200, windowMs: minute },
   sdkEvaluate: { capacity: 6000, windowMs: minute },
+  verifyEmail: { capacity: 20, windowMs: 15 * minute },
+  resendVerification: { capacity: 3, windowMs: 60 * minute },
+  forgotPassword: { capacity: 5, windowMs: 60 * minute },
+  forgotPasswordPerEmail: { capacity: 3, windowMs: 60 * minute },
+  resetPassword: { capacity: 10, windowMs: 15 * minute },
   sdkStream: { capacity: 60, windowMs: minute },
   sdkEvents: { capacity: 600, windowMs: minute },
 };

@@ -26,7 +26,7 @@ describe("CORS", () => {
   });
 
   it("in production with nothing configured, no origin is allowed (fails closed)", async () => {
-    const app = withConfig({ NODE_ENV: "production" });
+    const app = withConfig({ NODE_ENV: "production", MAIL_PROVIDER: "brevo", MAIL_API_KEY: "x".repeat(12) });
     const res = await request(app).get("/health").set("Origin", APP);
     expect(res.status).toBe(200); // the request itself is served; the browser is simply not told it may read it
     expect(allowed(res)).toBeUndefined();

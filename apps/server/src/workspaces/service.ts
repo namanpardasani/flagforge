@@ -74,8 +74,11 @@ export function createWorkspaceService(prisma: PrismaClient) {
       if (input.role === "ADMIN" && actor.role !== "OWNER") {
         throw forbidden("Only the owner can add admins");
       }
-      const user = await prisma.user.findUnique({ where: { email: input.email }, select: { id: true } });
+      const user = await prisma.user.findUnique({ where: { email: input.email }, select: { id: true, emailVerifiedAt: true } });
       if (!user) throw new AppError(404, "USER_NOT_FOUND", "No user with this email");
+      // Adding someone by email trusts that the address belongs to the person you mean. Until they
+      // have confirmed it, anyone could have registered it.
+      if (!user.emailVerifiedAt) throw new AppError(409, "EMAIL_NOT_VERIFIED", "This person has not confirmed their email address yet. Ask them to open the confirmation email, then add them");
       try {
         await prisma.workspaceMember.create({
           data: { workspaceId, userId: user.id, role: input.role },

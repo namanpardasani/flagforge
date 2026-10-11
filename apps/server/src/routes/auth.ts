@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { loginSchema, refreshSchema, registerSchema } from "../auth/schemas.js";
+import { forgotPasswordSchema, loginSchema, refreshSchema, registerSchema, resetPasswordSchema, verifyEmailSchema } from "../auth/schemas.js";
 import type { AuthService } from "../auth/service.js";
 import type { Config } from "../config.js";
 import { clientIp, fingerprint, rateLimit } from "../middleware/rate-limit.js";
@@ -37,6 +37,41 @@ export function authRouter(auth: AuthService, config: Config, limiter: RateLimit
   router.post("/auth/logout", byIp("refresh", limits.refresh), validate(refreshSchema), async (req, res) => {
     await auth.logout(req.body.refreshToken);
     res.status(204).end();
+  });
+
+  // ---- email verification and password reset ----
+  router.post("/auth/verify-email", byIp("verify-email", limits.verifyEmail), validate(verifyEmailSchema), async (req, res) => {
+    res.json(await auth.verifyEmail(req.body.token));
+  });
+
+  router.post(
+    "/auth/resend-verification",
+    requireAuth(config),
+    // Each press sends a real email, so it is limited per user (and per IP as a backstop).
+    rateLimit(limiter, { name: "resend-verification", rule: limits.resendVerification, key: (req) => fingerprint(req.userId ?? "", clientIp(req)) }),
+    async (req, res) => {
+      res.json(await auth.resendVerification(req.userId!));
+    },
+  );
+
+  // 202 whatever the address: the answer never says whether an account exists.
+  router.post(
+    "/auth/forgot-password",
+    byIp("forgot-password", limits.forgotPassword),
+    rateLimit(limiter, {
+      name: "forgot-password-email",
+      rule: limits.forgotPasswordPerEmail,
+      key: (req) => (typeof req.body?.email === "string" ? fingerprint(req.body.email.trim().toLowerCase().slice(0, 254)) : undefined),
+    }),
+    validate(forgotPasswordSchema),
+    async (req, res) => {
+      await auth.forgotPassword(req.body.email);
+      res.status(202).json({ message: "If an account exists for that address, a reset link is on its way." });
+    },
+  );
+
+  router.post("/auth/reset-password", byIp("reset-password", limits.resetPassword), validate(resetPasswordSchema), async (req, res) => {
+    res.json(await auth.resetPassword(req.body.token, req.body.password));
   });
 
   router.get("/auth/me", requireAuth(config), async (req, res) => {

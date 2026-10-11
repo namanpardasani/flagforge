@@ -44,16 +44,40 @@ const envSchema = z.object({
         }, "CORS_ORIGINS entries must be origins like https://app.example.com (no path, no trailing slash)"),
       ),
     ),
+  // ---- email (verification and password reset) ----
+  /** Where emailed links point: the dashboard's address. Used to build "confirm your email" links. */
+  APP_URL: z.url().default("http://localhost:5173"),
+  /**
+   * log   : write messages to the server log (development only; refused in production)
+   * brevo : Brevo's HTTP API (free: 300 a day, verify one sender address)
+   * resend: Resend's HTTP API (free, but delivers only to a domain you have verified)
+   */
+  MAIL_PROVIDER: z.enum(["log", "brevo", "resend"]).default("log"),
+  MAIL_API_KEY: z.string().min(10).optional(),
+  MAIL_FROM: z
+    .string()
+    .regex(/^(?:[^<>\r\n]+<[^<>\s@]+@[^<>\s@]+>|[^<>\s@]+@[^<>\s@]+)$/, 'MAIL_FROM must look like "FlagForge <no-reply@example.com>" or no-reply@example.com')
+    .default("FlagForge <no-reply@flagforge.local>"),
   RATE_LIMIT_ENABLED: z
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),
 });
 
+const checked = envSchema.superRefine((env, ctx) => {
+  if (env.MAIL_PROVIDER !== "log" && !env.MAIL_API_KEY) {
+    ctx.addIssue({ code: "custom", path: ["MAIL_API_KEY"], message: `MAIL_API_KEY is required when MAIL_PROVIDER is ${env.MAIL_PROVIDER}` });
+  }
+  if (env.NODE_ENV === "production" && env.MAIL_PROVIDER === "log") {
+    // The messages hold single-use secret links; a production log is not a private place for them.
+    ctx.addIssue({ code: "custom", path: ["MAIL_PROVIDER"], message: "MAIL_PROVIDER=log is for development only. Set MAIL_PROVIDER to brevo or resend (and MAIL_API_KEY) in production" });
+  }
+});
+
 export type Config = z.infer<typeof envSchema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const result = envSchema.safeParse(env);
+  const result = checked.safeParse(env);
   if (!result.success) {
     const problems = result.error.issues
       .map((issue) => `  - ${issue.path.join(".") || "(env)"}: ${issue.message}`)

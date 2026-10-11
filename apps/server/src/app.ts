@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 import type { PrismaClient } from "../generated/prisma/client.js";
 import { createApiKeyService } from "./apikeys/service.js";
 import { createAuthService } from "./auth/service.js";
+import { createMailer, type Mailer } from "./mail/index.js";
 import { createExperimentService } from "./experiments/service.js";
 import type { Config } from "./config.js";
 import { createFlagService } from "./flags/service.js";
@@ -34,12 +35,14 @@ export interface AppDeps {
   redis?: RedisServices;
   /** Event bus + SSE streams. Created automatically when omitted; pass one to control shutdown. */
   realtime?: Realtime;
+  /** Sends verification and reset emails. Created from the configuration when omitted. */
+  mailer?: Mailer;
   /** Override rate limits (tests use this). */
   limits?: Partial<RateLimits>;
 }
 
 /** Builds the Express app without listening on a port, so tests can import it. */
-export function createApp({ logger, config, prisma, checkDatabase, redis, realtime, limits: limitOverrides }: AppDeps) {
+export function createApp({ logger, config, prisma, checkDatabase, redis, realtime, mailer, limits: limitOverrides }: AppDeps) {
   const services = redis ?? createRedisServices({ REDIS_URL: undefined, RATE_LIMIT_ENABLED: config.RATE_LIMIT_ENABLED });
   const rt = realtime ?? createRealtime(prisma, config, services.bus);
   const limits: RateLimits = { ...defaultLimits, ...limitOverrides };
@@ -78,7 +81,7 @@ export function createApp({ logger, config, prisma, checkDatabase, redis, realti
   app.use(express.json({ limit: "100kb" }));
 
   app.use(healthRouter(checkDatabase, () => services.status()));
-  app.use(authRouter(createAuthService(prisma, config), config, services.rateLimiter, limits));
+  app.use(authRouter(createAuthService(prisma, config, { mailer: mailer ?? createMailer(config, logger), logger }), config, services.rateLimiter, limits));
   app.use(workspacesRouter(createWorkspaceService(prisma), prisma, config));
   app.use(projectsRouter(createProjectService(prisma, services.keyCache), prisma, config, rt.dashboard));
   app.use(flagsRouter(createFlagService(prisma, { bus: rt.bus, cache: services.configCache }), prisma, config));
