@@ -179,6 +179,25 @@ describe("sending", () => {
   });
 });
 
+describe("counting what is waiting", () => {
+  it("events on their way to the server still count as queued until they are delivered", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    // A server that holds the request open, so the batch is in flight for as long as the test likes.
+    const original = globalThis.fetch;
+    const slow = ((input: unknown, init?: RequestInit) => (String(input).endsWith("/sdk/v1/events") ? gate.then(() => original(input as string, init)) : original(input as string, init))) as typeof fetch;
+    const held = await ready({ fetch: slow, eventsFlushIntervalMs: 60_000 });
+    held.isEnabled("checkout", { key: "a" });
+    held.isEnabled("checkout", { key: "b" });
+    const sending = held.flush();
+    await wait(30);
+    expect(held.status.events).toEqual({ queued: 2, sent: 0, dropped: 0 }); // in flight, not lost from the count
+    release();
+    await sending;
+    expect(held.status.events).toEqual({ queued: 0, sent: 2, dropped: 0 });
+  });
+});
+
 describe("when sending fails", () => {
   it("keeps the events and delivers them once the server recovers", async () => {
     const errors: FlagForgeError[] = [];

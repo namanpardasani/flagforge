@@ -38,13 +38,15 @@ export class EventReporter {
   #stopped = false;
   #sent = 0;
   #dropped = 0;
+  /** Events taken off the queue and on their way to the server right now: not delivered yet, so still "waiting". */
+  #inFlight = 0;
 
   constructor(options: EventReporterOptions) {
     this.#options = options;
   }
 
   get stats() {
-    return { queued: this.#queue.length, sent: this.#sent, dropped: this.#dropped };
+    return { queued: this.#queue.length + this.#inFlight, sent: this.#sent, dropped: this.#dropped };
   }
 
   /** "This user was shown this variant." Sent once per user per flag (again only if the value changes). */
@@ -95,7 +97,9 @@ export class EventReporter {
   async #flush(): Promise<void> {
     while (this.#queue.length > 0) {
       const batch = this.#queue.splice(0, BATCH);
+      this.#inFlight = batch.length;
       const outcome = await this.#send(batch);
+      this.#inFlight = 0;
       if (outcome === "sent") {
         this.#sent += batch.length;
       } else if (outcome === "retry") {
