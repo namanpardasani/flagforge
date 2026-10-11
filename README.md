@@ -20,6 +20,13 @@ down in [NOTES.md](NOTES.md).
   call, not a network request, and keeps working if FlagForge is unreachable.
 - **Workspaces and roles.** Owner, admin, member and viewer, enforced on the server for every request.
   Tenants are isolated: every query is filtered by workspace.
+- **Experiments (A/B tests).** Compare the users who got a flag with those who did not, on one
+  thing your code reports (a purchase, say). Results come with a confidence interval, refuse to
+  conclude from too little data, and warn when the split does not match the rollout.
+- **Scheduled rollouts.** "At 09:00 Monday, take it to 25%." Several plans make a ramp. Each runs
+  through the same code as a click, and re-checks that whoever planned it may still change flags.
+- **Accounts.** Email confirmation and password reset by single-use emailed links, with sessions
+  signed out on reset.
 - **Audit log.** Who changed what and where, written in the same transaction as the change.
 - **Kill switch with a guard.** Any change in production needs a deliberate hold-to-confirm.
 
@@ -46,7 +53,9 @@ the receiver fetches through the normal endpoint. A lost or repeated event canno
 |---|---|
 | `apps/server` | REST API: Express, TypeScript, Prisma, PostgreSQL, Redis |
 | `apps/web` | Dashboard and landing page: React, Vite, Tailwind, TanStack Query, Motion |
-| `apps/demo` | A small shop that uses the SDK, to watch a flag change live |
+| `apps/demo` | A small shop that uses the SDK, to watch a flag change live and feed an experiment |
+| `loadtest/`, `bench/` | Load-test scripts and reproducible benchmarks (results in `docs/BENCHMARKS.md`) |
+| `scripts/` | `facts.mjs` counts the tests and routes the landing page states |
 | `packages/core` | Pure evaluation logic (hashing, rules), shared by server and SDK so they cannot disagree |
 | `packages/sdk` | Server-side SDK: local evaluation, streaming, polling, offline fallback |
 
@@ -75,6 +84,11 @@ npx vite                             # dashboard on http://localhost:5173
 Open http://localhost:5173, create an account, and follow the first-run setup. The landing page is
 at http://localhost:5173/landing.
 
+**Email in development.** No email leaves your machine: with the default `MAIL_PROVIDER=log` the
+confirmation and password-reset emails are printed as one line in the API's terminal, ending with
+the link. Copy the link into the browser. (Production refuses this setting and needs a real
+provider; see [DEPLOY.md](DEPLOY.md).)
+
 For the database URLs, `docker-compose.yml` creates the user `flagforge` and the database
 `flagforge`. Tests need a second database whose name ends in `_test`:
 
@@ -91,7 +105,8 @@ cd apps/demo
 FLAGFORGE_API_KEY=ff_your_key npx tsx src/server.ts   # http://localhost:4000
 ```
 
-Flip the flag in the dashboard and the checkout changes. See [apps/demo/README.md](apps/demo/README.md).
+Flip the flag in the dashboard and the checkout changes. The demo also reports who sees which
+checkout and who pays, so you can run an experiment on it. See [apps/demo/README.md](apps/demo/README.md).
 
 ## Using the SDK
 
@@ -133,6 +148,8 @@ CI runs all of them, plus typechecking, linting and a production build, on every
 
 - Passwords are hashed with bcrypt; access tokens last 15 minutes; refresh tokens are single-use,
   stored only as hashes, and replaying an old one revokes the whole family.
+- Emailed links carry a random token in the URL fragment (never sent to any server or log), stored
+  only as a hash, usable once. "Forgot password" answers the same for every address.
 - API keys are shown once and stored only as SHA-256 hashes.
 - Non-members get 404, not 403, so the existence of other tenants' workspaces is not revealed.
 - Rate limits use a token bucket in Redis (atomic Lua) with an in-memory fallback, so losing Redis

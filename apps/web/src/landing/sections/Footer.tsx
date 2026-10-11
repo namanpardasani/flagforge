@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { Ticker } from "@/components/ui/ticker";
 import { paths } from "@/components/shell/use-scope";
 import { Reveal } from "@/motion";
+import { FACTS } from "../facts";
 import { useFinePointer, useNear } from "../hooks";
 import { Magnetic } from "../Magnetic";
 
@@ -12,11 +13,11 @@ const WORD = [..."FLAGFORGE"];
 /** How close the cursor must be (as a share of the wordmark's width) for a letter to react. */
 const REACH = 0.22;
 
-// Counted from the repository on the day this page was written, not estimates.
-const FACTS = [
-  { value: 382, pad: 3, label: "tests: server, core, SDK" },
-  { value: 33, pad: 2, label: "API routes" },
-  { value: 4, pad: 1, label: "roles, owner to viewer" },
+// Counted from the repository by scripts/facts.mjs, not typed in (see landing/facts.ts).
+const STATS = [
+  { value: FACTS.tests, pad: 3, label: `tests across ${FACTS.packages} packages` },
+  { value: FACTS.routes, pad: 2, label: "API routes" },
+  { value: FACTS.roles, pad: 1, label: "roles, owner to viewer" },
 ] as const;
 
 export default function Footer({ dashboardPath }: { dashboardPath: string }) {
@@ -36,7 +37,7 @@ export default function Footer({ dashboardPath }: { dashboardPath: string }) {
         </Reveal>
 
         <dl ref={factsRef} className="mt-16 grid gap-y-4 border-t border-hairline pt-6 sm:grid-cols-3">
-          {FACTS.map((fact) => (
+          {STATS.map((fact) => (
             <div key={fact.label} className="flex items-baseline gap-3">
               {/* Counts up from zero the first time it is seen; the real value is always in the markup for screen readers. */}
               <dd className="text-2xl text-ink">
